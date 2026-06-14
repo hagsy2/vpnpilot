@@ -1,93 +1,140 @@
-# 🛡️ HA VPN Auto Installer
+# VPNPilot 🛡️
 
-Веб-панель, которая **автоматически устанавливает VPN на твой сервер**. Вводишь IP и пароль — приложение само подключается по SSH, определяет ОС и ставит выбранный VPN-протокол со свежими конфигами. Для новичков и продвинутых.
+> Веб-панель для автоматической установки VPN на удалённые серверы по SSH.  
+> Вводишь IP и пароль — остальное делает она.
 
-![status](https://img.shields.io/badge/protocols-7-blue) ![license](https://img.shields.io/badge/license-MIT-green)
+![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
+![Protocols](https://img.shields.io/badge/протоколов-7-6366f1)
+![License](https://img.shields.io/badge/license-MIT-22c55e)
 
-## ✨ Возможности
+---
 
-- **7 протоколов**: WireGuard, OpenVPN, VLESS+Reality, 3X-UI, Shadowsocks, Outline, IKEv2
-- **Описание стойкости к блокировкам** у каждого — понятно даже новичку
-- **QR-коды и конфиг-файлы** сразу после установки
-- **Управление клиентами** — добавляй/удаляй прямо из панели
-- **Полный снос VPN** с сервера в один клик
-- **AI-помощник** (Groq / Gemini / OpenRouter / DeepSeek) — чинит ошибки установки на лету
-- **Авто-определение ОС** (Debian, Ubuntu, CentOS, AlmaLinux, Rocky, Fedora, Arch)
+## Что умеет
 
-## 🚀 Установка в Proxmox (рекомендуется)
+- **Подключается к серверу по SSH** — IP + пароль, больше ничего не нужно
+- **Определяет ОС автоматически** — Debian, Ubuntu, CentOS, AlmaLinux, Rocky, Fedora, Arch
+- **Устанавливает VPN одной кнопкой** — 7 протоколов, свежие конфиги
+- **Выдаёт QR-коды и конфиг-файлы** сразу после установки
+- **Управляет клиентами** — добавляй/удаляй прямо из панели
+- **Сносит VPN с сервера** — полностью, одним кликом
+- **AI-помощник** чинит ошибки установки на лету (Groq, Gemini, OpenRouter, DeepSeek)
 
-Запусти **на хосте Proxmox** (создаст LXC-контейнер автоматически):
+---
+
+## Протоколы
+
+| Протокол | Стойкость к блокировкам | Для новичков | Рекомендуем |
+|---|---|---|---|
+| WireGuard | ⭐⭐ Низкая | ✅ Просто | |
+| OpenVPN | ⭐⭐⭐ Средняя | ✅ Просто | |
+| **VLESS + Reality** | **⭐⭐⭐⭐⭐ Максимум** | ⚠️ Средне | ✅ **Да** |
+| 3X-UI | ⭐⭐⭐⭐⭐ Максимум | ✅ Просто | |
+| Shadowsocks | ⭐⭐⭐⭐ Высокая | ✅ Просто | |
+| **Outline** | **⭐⭐⭐⭐ Высокая** | **✅ Просто** | ✅ **Да** |
+| IKEv2 | ⭐⭐⭐ Средняя | ✅ Просто | |
+
+---
+
+## Установка
+
+### 🐧 Установка в Proxmox (рекомендуется)
+
+Запусти **на хосте Proxmox** — скрипт создаст LXC-контейнер и поднимет панель внутри:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hagsy2/vpnpilot/main/proxmox-install.sh)"
 ```
 
-После установки открой `http://<IP-контейнера>:8080`.
+После установки открой `http://<IP-контейнера>:8080` в браузере.
 
-## 📦 Установка в готовый контейнер / VM
+### 📦 Установка в готовый контейнер / VM
 
-Внутри Debian/Ubuntu контейнера:
+Внутри Debian/Ubuntu:
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hagsy2/vpnpilot/main/install.sh)"
 ```
 
-## 🐳 Docker
+### 🐳 Docker
 
 ```bash
-docker build -t ha-vpn-auto .
-docker run -d -p 8080:8080 -v $(pwd)/data:/app/data ha-vpn-auto
+docker build -t vpnpilot .
+docker run -d -p 8080:8080 -v $(pwd)/data:/app/data vpnpilot
 ```
 
-## 💻 Локальный запуск (для разработки)
+### 💻 Локально (разработка)
 
 ```bash
+git clone https://github.com/hagsy2/vpnpilot
+cd vpnpilot
 pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8080 --reload
-# открой http://localhost:8080
 ```
 
-## 🤖 AI-помощник (необязательно, но полезно)
+Открой [http://localhost:8080](http://localhost:8080).
 
-Серверы бывают разные, и иногда установка спотыкается. AI читает ошибки и исправляет их сам. Вставь ключ любого провайдера в форму — приложение определит какой по префиксу:
+---
 
-| Провайдер | Ключ | Стоимость |
-|-----------|------|-----------|
-| **Groq** ⭐ | `gsk_...` | бесплатно, без карты — [console.groq.com/keys](https://console.groq.com/keys) |
-| Google Gemini | `AIza...` | бесплатный tier — [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| OpenRouter | `sk-or-...` | есть бесплатные модели — [openrouter.ai/keys](https://openrouter.ai/keys) |
-| DeepSeek | `sk-...` | дёшево, нужен баланс ~$2 |
+## AI-помощник
 
-## ⚙️ Управление сервисом
+Сервера бывают разные — иногда установка спотыкается на неожиданных ошибках. AI читает вывод, понимает что пошло не так, и сам применяет исправление.
+
+Вставь ключ любого провайдера в форму — приложение определит его автоматически по префиксу:
+
+| Провайдер | Префикс ключа | Стоимость | Где взять |
+|---|---|---|---|
+| **Groq** ⭐ | `gsk_...` | **Бесплатно, без карты** | [console.groq.com/keys](https://console.groq.com/keys) |
+| Google Gemini | `AIza...` | Бесплатный tier | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+| OpenRouter | `sk-or-...` | Есть бесплатные модели | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| DeepSeek | `sk-...` | ~$2 мин. баланс | [platform.deepseek.com](https://platform.deepseek.com) |
+
+> AI необязателен — установка работает и без него. Но с ним гораздо надёжнее.
+
+---
+
+## Управление сервисом
 
 ```bash
-systemctl status  ha-vpn-auto
-systemctl restart ha-vpn-auto
-journalctl -u ha-vpn-auto -f
+systemctl status  ha-vpn-auto    # статус
+systemctl restart ha-vpn-auto    # перезапуск
+journalctl -u ha-vpn-auto -f     # логи в реальном времени
 ```
 
-## 🔐 Безопасность
+---
 
-- Пароли серверов хранятся локально в `data/servers.json` (не коммитится — в `.gitignore`)
-- Запускай панель в закрытой сети или за firewall — она даёт root-доступ к твоим серверам
-- Рекомендуется поставить reverse-proxy с авторизацией, если открываешь наружу
-
-## 📁 Структура
+## Структура проекта
 
 ```
-main.py                 FastAPI сервер + WebSocket
-modules/
-  ssh_manager.py        SSH-подключение, стриминг вывода
-  os_detector.py        определение ОС
-  vpn_installer.py      рецепты установки + снос (7 протоколов)
-  vpn_manager.py        управление клиентами, QR, ссылки
-  ai_assistant.py       AI авто-исправление ошибок
-  storage.py            хранение серверов
-static/                 веб-интерфейс
-install.sh              установщик в контейнер
-proxmox-install.sh      создание LXC с хоста Proxmox
+vpnpilot/
+├── main.py                  # FastAPI-сервер, WebSocket, все API-эндпоинты
+├── modules/
+│   ├── ssh_manager.py       # SSH-подключение, стриминг вывода
+│   ├── os_detector.py       # определение ОС (/etc/os-release)
+│   ├── vpn_installer.py     # рецепты установки и сноса (7 протоколов)
+│   ├── vpn_manager.py       # управление клиентами, генерация QR и ссылок
+│   ├── ai_assistant.py      # мульти-провайдерный AI, авто-фикс ошибок
+│   └── storage.py           # JSON-хранилище серверов
+├── static/
+│   ├── index.html           # основной UI (2 вкладки)
+│   ├── app.js               # вся логика фронтенда
+│   └── style.css            # GitHub Dark тема
+├── install.sh               # установщик внутри контейнера/VM
+├── proxmox-install.sh       # создание LXC на хосте Proxmox
+├── Dockerfile
+└── requirements.txt
 ```
 
-## 📄 Лицензия
+---
 
-MIT
+## Безопасность
+
+- Пароли серверов хранятся **локально** в `data/servers.json` (в `.gitignore`, никогда не коммитится)
+- Панель даёт root-доступ к твоим серверам — держи её в **закрытой сети** или за VPN
+- Для публичного доступа рекомендуется reverse-proxy (nginx/caddy) с Basic Auth или mTLS
+
+---
+
+## Лицензия
+
+MIT — делай что хочешь, ссылка приветствуется.
