@@ -1,0 +1,382 @@
+import asyncio
+import json
+import uuid
+from pathlib import Path
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
+from modules.ssh_manager import SSHManager, test_connection
+from modules.os_detector import detect_os, parse_arch
+from modules.vpn_installer import PROTOCOLS
+from modules.ai_assistant import looks_like_error, ask_ai, extract_config_from_output
+from modules import storage, vpn_manager
+
+app = FastAPI(title="HA VPN Auto Installer")
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Active installation sessions
+sessions: dict[str, dict] = {}
+
+
+# ── Pydantic models ───────────────────────────────────────────────────────────
+
+class TestConnRequest(BaseModel):
+    host: str
+    port: int = 22
+    username: str = "root"
+    password: str
+
+
+class InstallRequest(BaseModel):
+    host: str
+    port: int = 22
+    username: str = "root"
+    password: str
+    protocol: str
+    deepseek_api_key: str = ""
+
+
+class AddClientRequest(BaseModel):
+    client_name: str
+
+
+# ── Pages ─────────────────────────────────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def index():
+    return Path("static/index.html").read_text()
+
+
+# ── Protocols ─────────────────────────────────────────────────────────────────
+
+@app.get("/api/protocols")
+async def get_protocols():
+    return [
+        {
+            "id": p.id, "name": p.name, "description": p.description, "icon": p.icon,
+            "blocking_level": p.blocking_level, "blocking_text": p.blocking_text,
+            "ease": p.ease, "devices": p.devices, "recommended": p.recommended,
+        }
+        for p in PROTOCOLS.values()
+    ]
+
+
+# ── Connection test ───────────────────────────────────────────────────────────
+
+@app.post("/api/test-connection")
+async def api_test_connection(req: TestConnRequest):
+    ok, msg = await test_connection(req.host, req.port, req.username, req.password)
+    return {"success": ok, "message": msg}
+
+
+# ── Install ───────────────────────────────────────────────────────────────────
+
+@app.post("/api/install")
+async def api_install(req: InstallRequest):
+    if req.protocol not in PROTOCOLS:
+        return JSONResponse({"error": "Неизвестный протокол"}, status_code=400)
+    session_id = str(uuid.uuid4())
+    sessions[session_id] = {
+        "status": "pending",
+        "log": [],
+        "config": None,
+        "error": None,
+        "req": req.model_dump(),
+    }
+    asyncio.create_task(run_installation(session_id))
+    return {"session_id": session_id}
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(ws: WebSocket, session_id: str):
+    await ws.accept()
+    sent = 0
+    try:
+        while True:
+            if session_id not in sessions:
+                await ws.send_json({"type": "error", "message": "Сессия не найдена"})
+                break
+            session = sessions[session_id]
+            log = session["log"]
+            while sent < len(log):
+                await ws.send_json({"type": "log", "message": log[sent]})
+                sent += 1
+            if session["status"] in ("done", "error"):
+                await ws.send_json({
+                    "type": "done",
+                    "status": session["status"],
+                    "config": session.get("config"),
+                    "error": session.get("error"),
+                    "server_id": session.get("server_id"),
+                })
+                break
+            await asyncio.sleep(0.2)
+    except WebSocketDisconnect:
+        pass
+
+
+# ── Server management ─────────────────────────────────────────────────────────
+
+@app.get("/api/servers")
+async def api_list_servers():
+    servers = storage.list_servers()
+    # Don't expose passwords in list
+    return [
+        {k: v for k, v in s.items() if k != "password"}
+        for s in servers
+    ]
+
+
+@app.delete("/api/servers/{server_id}")
+async def api_delete_server(server_id: str):
+    ok = storage.delete_server(server_id)
+    return {"success": ok}
+
+
+@app.post("/api/servers/{server_id}/uninstall")
+async def api_uninstall(server_id: str):
+    """Fully remove the VPN from the remote server, then drop it from the list."""
+    srv = storage.get_server(server_id)
+    if not srv:
+        return JSONResponse({"error": "Сервер не найден"}, status_code=404)
+    proto = PROTOCOLS.get(srv["protocol"])
+    if not proto or not proto.uninstall_cmd:
+        return JSONResponse({"error": "Снос не поддерживается для этого протокола"}, status_code=400)
+
+    ssh = SSHManager()
+    log_lines: list = []
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.connect(srv["host"], srv["port"], srv["username"], srv["password"])
+        )
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: ssh.run_command_stream(proto.uninstall_cmd, lambda l: log_lines.append(l), timeout=300),
+        )
+        storage.delete_server(server_id)
+        return {"success": True, "log": log_lines[-40:]}
+    except Exception as e:
+        return JSONResponse({"error": str(e), "log": log_lines[-40:]}, status_code=500)
+    finally:
+        ssh.disconnect()
+
+
+@app.get("/api/servers/{server_id}/clients")
+async def api_get_clients(server_id: str):
+    srv = storage.get_server(server_id)
+    if not srv:
+        return JSONResponse({"error": "Сервер не найден"}, status_code=404)
+    ssh = SSHManager()
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.connect(srv["host"], srv["port"], srv["username"], srv["password"])
+        )
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: vpn_manager.get_clients(ssh, srv["protocol"], srv["host"], srv.get("config", {}))
+        )
+        return result
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        ssh.disconnect()
+
+
+@app.post("/api/servers/{server_id}/clients")
+async def api_add_client(server_id: str, req: AddClientRequest):
+    srv = storage.get_server(server_id)
+    if not srv:
+        return JSONResponse({"error": "Сервер не найден"}, status_code=404)
+    ssh = SSHManager()
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.connect(srv["host"], srv["port"], srv["username"], srv["password"])
+        )
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: vpn_manager.add_client(ssh, srv["protocol"], req.client_name)
+        )
+        return result
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        ssh.disconnect()
+
+
+@app.delete("/api/servers/{server_id}/clients/{client_name}")
+async def api_remove_client(server_id: str, client_name: str):
+    srv = storage.get_server(server_id)
+    if not srv:
+        return JSONResponse({"error": "Сервер не найден"}, status_code=404)
+    ssh = SSHManager()
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.connect(srv["host"], srv["port"], srv["username"], srv["password"])
+        )
+        ok = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: vpn_manager.remove_client(ssh, srv["protocol"], client_name)
+        )
+        return {"success": ok}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        ssh.disconnect()
+
+
+@app.get("/api/servers/{server_id}/clients/{client_name}/config")
+async def api_get_client_config(server_id: str, client_name: str):
+    srv = storage.get_server(server_id)
+    if not srv:
+        return JSONResponse({"error": "Сервер не найден"}, status_code=404)
+    ssh = SSHManager()
+    try:
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.connect(srv["host"], srv["port"], srv["username"], srv["password"])
+        )
+        result = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: vpn_manager.get_client_config(ssh, srv["protocol"], client_name)
+        )
+        return result
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        ssh.disconnect()
+
+
+# ── Installation runner ───────────────────────────────────────────────────────
+
+async def run_installation(session_id: str):
+    session = sessions[session_id]
+    req_data = session["req"]
+    session["status"] = "running"
+
+    def log(msg: str, level: str = "info"):
+        prefix = {"info": "ℹ️", "ok": "✅", "error": "❌", "warn": "⚠️",
+                  "ai": "🤖", "step": "📋"}.get(level, "·")
+        session["log"].append(f"{prefix} {msg}")
+
+    ssh = SSHManager()
+    protocol = PROTOCOLS[req_data["protocol"]]
+    all_output_lines: list = []
+    error_buffer: list = []
+
+    try:
+        log(f"Подключение к {req_data['host']}:{req_data['port']}...")
+        await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: ssh.connect(req_data["host"], req_data["port"],
+                                 req_data["username"], req_data["password"]),
+        )
+        log("Соединение установлено", "ok")
+
+        log("Определение операционной системы...")
+        os_raw, _, _ = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.run_command("cat /etc/os-release")
+        )
+        arch_raw, _, _ = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ssh.run_command("uname -m")
+        )
+        os_info = detect_os(os_raw)
+        arch = parse_arch(arch_raw)
+        log(f"ОС: {os_info['pretty']} ({arch})", "ok")
+
+        steps = protocol.steps_fn(os_info, req_data["host"])
+        log(f"Начинаю установку {protocol.name} ({len(steps)} шагов)", "step")
+
+        for i, step in enumerate(steps, 1):
+            log(f"[{i}/{len(steps)}] {step.description}", "step")
+
+            def on_output(line: str):
+                all_output_lines.append(line)
+                session["log"].append(f"  {line}")
+                if looks_like_error(line):
+                    error_buffer.append(line)
+
+            exit_code = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda s=step: ssh.run_command_stream(s.command, on_output, timeout=s.timeout),
+            )
+
+            if exit_code != 0 and not step.ignore_error:
+                if req_data.get("deepseek_api_key") and error_buffer:
+                    log("Обнаружена ошибка, спрашиваю AI...", "ai")
+                    fix_cmd, ai_reason = await ask_ai(
+                        req_data["deepseek_api_key"],
+                        all_output_lines, os_info["pretty"], protocol.name,
+                    )
+                    if ai_reason and not fix_cmd:
+                        log(f"AI не смог помочь — {ai_reason}", "warn")
+                    if fix_cmd:
+                        if fix_cmd.startswith("FATAL:"):
+                            raise RuntimeError(fix_cmd[6:].strip())
+                        log(f"AI предлагает: {fix_cmd[:80]}...", "ai")
+                        fix_lines: list = []
+                        fix_code = await asyncio.get_event_loop().run_in_executor(
+                            None,
+                            lambda: ssh.run_command_stream(fix_cmd, lambda l: fix_lines.append(l)),
+                        )
+                        for fl in fix_lines:
+                            session["log"].append(f"  [fix] {fl}")
+                        if fix_code == 0:
+                            log("AI исправление применено, повтор шага...", "ai")
+                            retry_code = await asyncio.get_event_loop().run_in_executor(
+                                None,
+                                lambda s=step: ssh.run_command_stream(s.command, on_output, timeout=s.timeout),
+                            )
+                            if retry_code != 0 and not step.ignore_error:
+                                raise RuntimeError(f"Шаг '{step.description}' провалился даже после AI-фикса")
+                        else:
+                            raise RuntimeError(f"AI фикс не помог. Шаг: {step.description}")
+                    else:
+                        raise RuntimeError(f"Шаг '{step.description}' завершился с ошибкой (код {exit_code})")
+                else:
+                    if not req_data.get("deepseek_api_key"):
+                        log("Произошла ошибка. С ключом DeepSeek AI я бы попробовал исправить её автоматически — добавь ключ и попробуй снова.", "ai")
+                    raise RuntimeError(f"Шаг '{step.description}' завершился с ошибкой (код {exit_code})")
+
+            error_buffer.clear()
+            log(f"Шаг {i} выполнен", "ok")
+
+        log("Получение конфигурации...", "step")
+        if protocol.post_install_fn:
+            config = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: protocol.post_install_fn(ssh, os_info),
+            )
+            config["server_ip"] = req_data["host"]
+            # add ready-to-use links + QR codes for the user
+            config = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: vpn_manager.enrich_install_config(ssh, req_data["protocol"], config, req_data["host"]),
+            )
+        else:
+            config = extract_config_from_output("\n".join(all_output_lines), req_data["protocol"])
+
+        # Save to managed servers
+        server_id = storage.save_server(
+            req_data["host"], req_data["port"], req_data["username"], req_data["password"],
+            req_data["protocol"], protocol.name, config,
+        )
+        session["config"] = config
+        session["server_id"] = server_id
+        session["status"] = "done"
+        log(f"🎉 {protocol.name} установлен! Сервер сохранён в управление.", "ok")
+
+    except Exception as e:
+        session["status"] = "error"
+        session["error"] = str(e)
+        log(f"Ошибка: {e}", "error")
+    finally:
+        try:
+            ssh.disconnect()
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8080, reload=True)

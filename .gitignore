@@ -1,0 +1,21 @@
+# Saved servers contain SSH passwords — never commit
+data/servers.json
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Local Claude state
+.claude/
+
+# Logs
+*.log

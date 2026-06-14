@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HA VPN Auto Installer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bg-grid"></div>
+
+<div class="container">
+  <header class="header">
+    <div class="logo">
+      <span class="logo-icon">🛡️</span>
+      <div>
+        <h1>VPN Auto Installer</h1>
+        <p class="subtitle">Автоматическая установка и управление VPN</p>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" onclick="switchTab('install')">🚀 Установка</button>
+      <button class="tab" onclick="switchTab('manage')" id="tab-manage">📋 Серверы</button>
+    </nav>
+  </header>
+
+  <!-- ══════════════════════ TAB: INSTALL ══════════════════════ -->
+  <div id="page-install">
+
+    <!-- STEP 1 -->
+    <div class="card" id="step-server">
+      <div class="card-header">
+        <span class="step-badge">1</span>
+        <h2>Подключение к серверу</h2>
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>IP-адрес сервера</label>
+          <input type="text" id="host" placeholder="185.123.45.67" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>SSH порт</label>
+          <input type="number" id="port" value="22" min="1" max="65535">
+        </div>
+        <div class="form-group">
+          <label>Пользователь</label>
+          <input type="text" id="username" value="root">
+        </div>
+        <div class="form-group">
+          <label>Пароль</label>
+          <div class="input-wrap">
+            <input type="password" id="password" placeholder="•••••••••••">
+            <button class="toggle-pass" onclick="togglePass()" title="Показать пароль">👁</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="ai-box">
+        <div class="ai-box-head">
+          <span class="ai-box-icon">🤖</span>
+          <div>
+            <div class="ai-box-title">AI-помощник следит за установкой</div>
+            <div class="ai-box-sub">Если что-то пойдёт не так, он сам разберётся и починит — тебе ничего делать не надо</div>
+          </div>
+        </div>
+        <p class="ai-box-desc">
+          Серверы бывают разные, и иногда установка спотыкается. AI читает ошибки и исправляет их на лету.
+          Вставь ключ от любого из провайдеров — приложение само определит какой:
+        </p>
+        <ul class="ai-providers">
+          <li><strong>Groq</strong> — <span class="free-tag">бесплатно, без карты</span> <a href="https://console.groq.com/keys" target="_blank">получить ключ →</a> <span class="ai-hint">(рекомендуем)</span></li>
+          <li><strong>Google Gemini</strong> — <span class="free-tag">бесплатно</span> <a href="https://aistudio.google.com/apikey" target="_blank">получить ключ →</a></li>
+          <li><strong>OpenRouter</strong> — <span class="free-tag">есть бесплатные модели</span> <a href="https://openrouter.ai/keys" target="_blank">получить ключ →</a></li>
+          <li><strong>DeepSeek</strong> — дёшево, но нужно пополнить баланс (~$2)</li>
+        </ul>
+        <div class="form-group">
+          <label>API-ключ (рекомендуем, но можно без него)</label>
+          <input type="password" id="ai-key" placeholder="gsk_... / AIza... / sk-or-... / sk-...">
+        </div>
+      </div>
+
+      <button class="btn btn--primary" id="btn-test" onclick="testConnection()">
+        <span class="btn-icon">🔌</span> Проверить соединение
+      </button>
+      <div id="test-result" class="test-result hidden"></div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="card card--locked" id="step-protocol">
+      <div class="card-header">
+        <span class="step-badge">2</span>
+        <h2>Выбор протокола VPN</h2>
+      </div>
+      <div id="protocol-grid" class="protocol-grid">
+        <div class="loading-protocols">Загрузка...</div>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="card card--locked" id="step-install">
+      <div class="card-header">
+        <span class="step-badge">3</span>
+        <h2>Установка</h2>
+      </div>
+      <div id="selected-summary" class="selected-summary"></div>
+      <button class="btn btn--success btn--large" id="btn-install" onclick="startInstall()">
+        <span class="btn-icon">🚀</span> Начать установку
+      </button>
+    </div>
+
+    <!-- Terminal -->
+    <div class="card card--terminal hidden" id="terminal-card">
+      <div class="card-header">
+        <span class="terminal-dot red"></span>
+        <span class="terminal-dot yellow"></span>
+        <span class="terminal-dot green"></span>
+        <span style="margin-left:12px;font-weight:600;color:#a0aec0">Установка VPN</span>
+        <div id="status-badge" class="status-badge status-badge--running">⏳ Выполняется</div>
+      </div>
+      <div id="terminal" class="terminal"></div>
+    </div>
+
+    <!-- Config result -->
+    <div class="card hidden" id="config-card">
+      <div class="card-header">
+        <span class="step-badge done">✓</span>
+        <h2>VPN установлен!</h2>
+      </div>
+      <div id="config-content"></div>
+      <button class="btn btn--primary" style="margin-top:16px" onclick="switchTab('manage')">
+        📋 Перейти к управлению серверами
+      </button>
+    </div>
+
+    <!-- Error -->
+    <div class="card card--error hidden" id="error-card">
+      <div class="card-header">
+        <span class="step-badge error">!</span>
+        <h2>Ошибка установки</h2>
+      </div>
+      <div id="error-content" class="error-content"></div>
+      <button class="btn btn--primary" onclick="resetToStart()">↩ Начать заново</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════ TAB: MANAGE ══════════════════════ -->
+  <div id="page-manage" class="hidden">
+    <div class="card">
+      <div class="card-header">
+        <span class="step-badge">📋</span>
+        <h2>Управление серверами</h2>
+        <button class="btn btn--primary" style="margin-left:auto;padding:6px 14px;font-size:.8rem" onclick="loadServers()">↻ Обновить</button>
+      </div>
+      <div id="servers-list">
+        <div class="empty-state">Загрузка...</div>
+      </div>
+    </div>
+
+    <!-- Server detail panel -->
+    <div class="card hidden" id="server-detail">
+      <div class="card-header">
+        <button class="back-btn" onclick="closeServerDetail()">← Назад</button>
+        <h2 id="detail-title">Сервер</h2>
+        <div id="detail-badge" class="proto-badge"></div>
+      </div>
+      <div id="detail-content"></div>
+    </div>
+  </div>
+</div>
+
+<!-- QR Modal -->
+<div class="modal-overlay hidden" id="qr-modal" onclick="closeQR()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <h3 id="qr-title">QR-код</h3>
+      <button class="modal-close" onclick="closeQR()">✕</button>
+    </div>
+    <img id="qr-img" class="qr-img" src="" alt="QR">
+    <p id="qr-link" class="qr-link"></p>
+    <button class="btn btn--primary" style="width:100%;justify-content:center;margin-top:12px" onclick="copyQRLink()">📋 Скопировать ссылку</button>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
