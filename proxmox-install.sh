@@ -12,7 +12,7 @@ REPO_URL="${REPO_URL:-https://github.com/hagsy2/vpnpilot}"
 REPO_RAW="${REPO_URL/github.com/raw.githubusercontent.com}/${REPO_BRANCH:-main}"
 
 # Container defaults (override via env: HOSTNAME, DISK, CORES, RAM, BRIDGE, STORAGE)
-CT_HOSTNAME="${HOSTNAME:-ha-vpn-auto}"
+CT_HOSTNAME="${HOSTNAME:-vpnpilot}"
 CT_DISK="${DISK:-4}"          # GB
 CT_CORES="${CORES:-1}"
 CT_RAM="${RAM:-1024}"         # MB
@@ -85,7 +85,7 @@ pct create "$CTID" "${TMPL_STORAGE}:vztmpl/${TMPL_FILE}" \
   --features nesting=1 \
   --unprivileged 1 \
   --onboot 1 \
-  --description "HA VPN Auto Installer" \
+  --description "VPNPilot — авто-установщик VPN" \
   >/dev/null || die "pct create не удался"
 ok "Контейнер создан"
 

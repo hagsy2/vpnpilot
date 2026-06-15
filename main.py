@@ -326,6 +326,58 @@ async def api_version():
     return {"version": release, "commit": commit, "date": date, "up_to_date": up_to_date}
 
 
+def _changelog_top(text: str) -> str:
+    """Return the first version section of a Keep-a-Changelog file (## [x.y.z] ...)."""
+    lines = text.splitlines()
+    out, started = [], False
+    for ln in lines:
+        if ln.startswith("## "):
+            if started:
+                break
+            started = True
+        if started:
+            out.append(ln)
+    return "\n".join(out).strip()
+
+
+@app.get("/api/changelog")
+async def api_changelog():
+    """Patch notes for a pending update: commits between local HEAD and origin,
+    plus the latest CHANGELOG section from the remote. Used by the update dialog."""
+    import subprocess, os as _os
+    here = Path(__file__).parent
+    git_env = {**_os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    def git(*args, timeout=20):
+        return subprocess.check_output(
+            ["git", *args], cwd=here, text=True, stderr=subprocess.DEVNULL,
+            timeout=timeout, env=git_env,
+        ).strip()
+
+    try:
+        git("fetch", "origin", "main", timeout=40)
+    except Exception:
+        return {"available": None, "commits": [], "changelog": "", "error": "Не удалось связаться с GitHub"}
+
+    commits = []
+    try:
+        raw = git("log", "--pretty=format:%h\x1f%s\x1f%cs", "HEAD..origin/main")
+        for line in raw.splitlines():
+            parts = line.split("\x1f")
+            if len(parts) == 3:
+                commits.append({"sha": parts[0], "subject": parts[1], "date": parts[2]})
+    except Exception:
+        pass
+
+    changelog = ""
+    try:
+        changelog = _changelog_top(git("show", "origin/main:CHANGELOG.md", timeout=10))
+    except Exception:
+        changelog = ""
+
+    return {"available": len(commits) > 0, "commits": commits, "changelog": changelog}
+
+
 @app.websocket("/ws/update")
 async def ws_update(websocket: WebSocket):
     await websocket.accept()

@@ -101,6 +101,31 @@ body {
   display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;
 }
 
+/* ── Patch notes ── */
+.patchnotes {
+  margin-top: 12px; background: #0d1117; border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; max-height: 220px; overflow-y: auto;
+}
+.patchnotes-title {
+  font-size: 0.82rem; font-weight: 600; color: var(--text2);
+  margin-bottom: 8px; text-transform: uppercase; letter-spacing: .04em;
+}
+.patchnotes-list { list-style: none; margin: 0; padding: 0; }
+.patchnotes-list li {
+  font-size: 0.86rem; color: var(--text); padding: 4px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.04); line-height: 1.4;
+}
+.patchnotes-list li:last-child { border-bottom: none; }
+.patchnotes-list code {
+  font-family: monospace; font-size: 0.78rem; color: var(--accent);
+  background: rgba(47,129,247,0.1); padding: 1px 5px; border-radius: 4px;
+}
+.pn-date { color: var(--text2); font-size: 0.74rem; float: right; }
+.patchnotes-changelog {
+  font-size: 0.8rem; color: var(--text2); white-space: pre-wrap;
+  font-family: monospace; margin: 0;
+}
+
 /* ── Tabs ── */
 .tabs { display: flex; gap: 6px; }
 .tab {

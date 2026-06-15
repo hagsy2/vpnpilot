@@ -783,10 +783,12 @@ async function checkUpdates() {
     actions.innerHTML = `<button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
   } else if (v.up_to_date === false) {
     status.innerHTML = `<div class="update-line warn">⬆️ Доступно обновление!</div>
-      <div class="update-meta">Установлено: v${v.version || '?'} · ${v.commit} · ${v.date}</div>`;
+      <div class="update-meta">Установлено: v${v.version || '?'} · ${v.commit} · ${v.date}</div>
+      <div id="patchnotes" class="patchnotes"><div class="spinner-line">📝 Загружаю список изменений...</div></div>`;
     actions.innerHTML = `
       <button class="btn btn--primary" onclick="runUpdate()">Обновить сейчас</button>
       <button class="btn" onclick="closeUpdateModal()">Позже</button>`;
+    loadPatchNotes();
   } else {
     status.innerHTML = `<div class="update-line warn">⚠️ Не удалось сверить с GitHub (нет сети или git недоступен).</div>
       <div class="update-meta">Текущая: v${v.commit || '?'} · ${v.date || ''}</div>`;
@@ -794,6 +796,35 @@ async function checkUpdates() {
       <button class="btn btn--primary" onclick="runUpdate()">Всё равно обновить</button>
       <button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
   }
+}
+
+// Fetch and render patch notes (what's new in the pending update).
+async function loadPatchNotes() {
+  const box = document.getElementById('patchnotes');
+  if (!box) return;
+  let data;
+  try {
+    data = await (await fetch('/api/changelog')).json();
+  } catch {
+    box.innerHTML = '';
+    return;
+  }
+  if (!data || (!data.commits?.length && !data.changelog)) {
+    box.innerHTML = '';
+    return;
+  }
+
+  let html = '<div class="patchnotes-title">📝 Что нового</div>';
+  if (data.commits?.length) {
+    html += '<ul class="patchnotes-list">';
+    for (const c of data.commits) {
+      html += `<li><code>${escHtml(c.sha)}</code> ${escHtml(c.subject)} <span class="pn-date">${escHtml(c.date)}</span></li>`;
+    }
+    html += '</ul>';
+  } else if (data.changelog) {
+    html += `<pre class="patchnotes-changelog">${escHtml(data.changelog)}</pre>`;
+  }
+  box.innerHTML = html;
 }
 
 // Step 2 — pull + restart, streaming the log live.
