@@ -50,11 +50,25 @@ class SSHManager:
         buffer = ""
         channel.setblocking(False)
         deadline = time.time() + timeout
+        timed_out = False
+        last_activity = time.time()
+        # If a command produces no output and never exits (e.g. an installer
+        # waiting on interactive input), bail after `idle_limit` of silence so we
+        # never hang forever. Set to None to disable. Capped by the hard timeout.
+        idle_limit = min(timeout, 180)
 
-        while time.time() < deadline:
+        while True:
             if channel.exit_status_ready() and not channel.recv_ready():
                 break
+            now = time.time()
+            if now >= deadline:
+                timed_out = True
+                break
+            if idle_limit and (now - last_activity) >= idle_limit:
+                timed_out = True
+                break
             if channel.recv_ready():
+                last_activity = now
                 chunk = channel.recv(4096).decode("utf-8", errors="replace")
                 buffer += chunk
                 while "\n" in buffer or "\r" in buffer:
@@ -69,6 +83,16 @@ class SSHManager:
 
         if buffer.strip():
             on_output(buffer.strip())
+
+        if timed_out:
+            # Command is stuck — don't block on recv_exit_status (it would hang
+            # forever). Kill the channel and report a timeout exit code (124).
+            on_output(f"⏱️ Команда прервана: нет ответа дольше таймаута ({timeout}с). Возможно, установщик завис.")
+            try:
+                channel.close()
+            except Exception:
+                pass
+            return 124
 
         return channel.recv_exit_status()
 

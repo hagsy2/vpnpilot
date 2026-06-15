@@ -164,6 +164,40 @@ async def api_uninstall(server_id: str):
         ssh.disconnect()
 
 
+@app.post("/api/servers/{server_id}/reinstall")
+async def api_reinstall(server_id: str, body: dict = None):
+    """Re-run the installation for a saved server (e.g. after a hung/broken install).
+
+    By default wipes the old install first (clean=True), then reinstalls. Streams
+    over the same /ws/{session_id} channel as a fresh install.
+    """
+    srv = storage.get_server(server_id)
+    if not srv:
+        return JSONResponse({"error": "Сервер не найден"}, status_code=404)
+    if srv["protocol"] not in PROTOCOLS:
+        return JSONResponse({"error": "Неизвестный протокол"}, status_code=400)
+
+    body = body or {}
+    session_id = str(uuid.uuid4())
+    sessions[session_id] = {
+        "status": "pending",
+        "log": [],
+        "config": None,
+        "error": None,
+        "req": {
+            "host": srv["host"],
+            "port": srv["port"],
+            "username": srv["username"],
+            "password": srv["password"],
+            "protocol": srv["protocol"],
+            "deepseek_api_key": body.get("deepseek_api_key", ""),
+            "clean": body.get("clean", True),
+        },
+    }
+    asyncio.create_task(run_installation(session_id))
+    return {"session_id": session_id}
+
+
 @app.get("/api/servers/{server_id}/clients")
 async def api_get_clients(server_id: str):
     srv = storage.get_server(server_id)
@@ -252,20 +286,33 @@ async def api_get_client_config(server_id: str, client_name: str):
 
 @app.get("/api/version")
 async def api_version():
-    try:
-        import subprocess
-        commit = subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"], cwd=Path(__file__).parent, text=True
+    import subprocess, os as _os
+    here = Path(__file__).parent
+    git_env = {**_os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
+    def git(*args, timeout=10):
+        return subprocess.check_output(
+            ["git", *args], cwd=here, text=True, stderr=subprocess.DEVNULL,
+            timeout=timeout, env=git_env,
         ).strip()
-        date = subprocess.check_output(
-            ["git", "log", "-1", "--format=%ci"], cwd=Path(__file__).parent, text=True
-        ).strip()[:10]
-        remote = subprocess.check_output(
-            ["git", "ls-remote", "origin", "HEAD"], cwd=Path(__file__).parent, text=True
-        ).strip()[:7]
-        return {"commit": commit, "date": date, "up_to_date": remote == commit}
+
+    # Local version — must succeed independently of any network/auth.
+    try:
+        commit = git("rev-parse", "--short", "HEAD")
+        date = git("log", "-1", "--format=%ci")[:10]
     except Exception:
         return {"commit": "unknown", "date": "", "up_to_date": None}
+
+    # Remote check — best effort. On a private repo without creds this fails;
+    # that's fine, we report up_to_date=null and still allow a manual update.
+    up_to_date = None
+    try:
+        remote = git("ls-remote", "origin", "HEAD", timeout=15).split()[0][:7]
+        up_to_date = (remote == commit)
+    except Exception:
+        up_to_date = None
+
+    return {"commit": commit, "date": date, "up_to_date": up_to_date}
 
 
 @app.websocket("/ws/update")
@@ -279,9 +326,15 @@ async def ws_update(websocket: WebSocket):
         install_dir = Path(__file__).parent
         await send("🔄 Получаю обновления из GitHub...")
 
+        # GIT_TERMINAL_PROMPT=0 → never block on a credential prompt (private repo
+        # without creds fails fast with a clear error instead of hanging forever).
+        import os as _os
+        git_env = {**_os.environ, "GIT_TERMINAL_PROMPT": "0"}
+
         proc = await asyncio.create_subprocess_exec(
             "git", "pull", "--rebase",
             cwd=str(install_dir),
+            env=git_env,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -291,7 +344,7 @@ async def ws_update(websocket: WebSocket):
             await send(line)
 
         if proc.returncode != 0:
-            await send("❌ git pull завершился с ошибкой", "error")
+            await send("❌ git pull не удался. Если репозиторий приватный — на сервере нужно один раз настроить доступ к GitHub (токен). См. README → Обновления.", "error")
             await websocket.send_json({"type": "done", "success": False})
             return
 
@@ -362,17 +415,27 @@ async def run_installation(session_id: str):
         arch = parse_arch(arch_raw)
         log(f"ОС: {os_info['pretty']} ({arch})", "ok")
 
+        def on_output(line: str):
+            all_output_lines.append(line)
+            session["log"].append(f"  {line}")
+            if looks_like_error(line):
+                error_buffer.append(line)
+
+        # Optional clean slate — wipe any previous (possibly broken) install first.
+        if req_data.get("clean") and protocol.uninstall_cmd:
+            log("Очистка предыдущей установки перед переустановкой...", "step")
+            await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: ssh.run_command_stream(protocol.uninstall_cmd, on_output, timeout=300),
+            )
+            error_buffer.clear()
+            log("Очистка завершена", "ok")
+
         steps = protocol.steps_fn(os_info, req_data["host"])
         log(f"Начинаю установку {protocol.name} ({len(steps)} шагов)", "step")
 
         for i, step in enumerate(steps, 1):
             log(f"[{i}/{len(steps)}] {step.description}", "step")
-
-            def on_output(line: str):
-                all_output_lines.append(line)
-                session["log"].append(f"  {line}")
-                if looks_like_error(line):
-                    error_buffer.append(line)
 
             exit_code = await asyncio.get_event_loop().run_in_executor(
                 None,

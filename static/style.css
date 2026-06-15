@@ -90,6 +90,17 @@ body {
 .update-line.error { color: #f85149; }
 .update-line.warn { color: #d29922; }
 
+.update-status { padding: 4px 2px 8px; }
+.update-status .update-line { font-size: 1rem; font-weight: 600; }
+.update-meta {
+  font-size: 0.8rem; color: var(--text2);
+  font-family: monospace; margin-top: 4px;
+}
+.spinner-line { color: var(--text2); font-size: 0.95rem; }
+.update-actions {
+  display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap;
+}
+
 /* ── Tabs ── */
 .tabs { display: flex; gap: 6px; }
 .tab {

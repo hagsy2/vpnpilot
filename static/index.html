@@ -24,7 +24,7 @@
     </nav>
     <div class="header-right">
       <span id="version-badge" class="version-badge" title="Текущая версия"></span>
-      <button class="btn-update" id="btn-update" onclick="runUpdate()" title="Обновить до последней версии">⬆ Обновить</button>
+      <button class="btn-update" id="btn-update" onclick="checkUpdates()" title="Проверить обновления на GitHub">🔄 Проверить обновления</button>
     </div>
   </header>
 
@@ -33,10 +33,12 @@
     <div class="modal-backdrop" onclick="closeUpdateModal()"></div>
     <div class="modal-box">
       <div class="modal-header">
-        <h3>🔄 Обновление VPNPilot</h3>
+        <h3 id="update-modal-title">🔄 Обновление</h3>
         <button class="modal-close" onclick="closeUpdateModal()">✕</button>
       </div>
-      <div id="update-log" class="update-log"></div>
+      <div id="update-status" class="update-status"></div>
+      <div id="update-log" class="update-log" style="display:none"></div>
+      <div id="update-actions" class="update-actions"></div>
     </div>
   </div>
 

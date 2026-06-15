@@ -591,6 +591,19 @@ function renderServerDetail(detail, content, server, data) {
     </div>`;
   }
 
+  // Maintenance — reinstall (fix a hung/broken install)
+  html += `
+    <div class="config-block" style="border-color:rgba(245,158,11,0.3);background:rgba(245,158,11,0.04);margin-top:8px">
+      <h3 style="color:#f59e0b">♻️ Переустановить</h3>
+      <p style="font-size:.84rem;color:var(--text2);margin-bottom:12px">
+        Если установка зависла или что-то сломалось — снесёт старую и поставит ${escHtml(server.protocol_name)} заново начисто.
+      </p>
+      <button class="btn" style="border-color:#f59e0b;color:#f59e0b"
+        onclick="reinstallServer('${server.id}', '${escHtml(server.protocol_name)}')">
+        ♻️ Переустановить начисто
+      </button>
+    </div>`;
+
   // Danger zone — full uninstall
   html += `
     <div class="config-block" style="border-color:rgba(248,81,73,0.3);background:rgba(248,81,73,0.04);margin-top:8px">
@@ -732,7 +745,7 @@ async function loadVersion() {
     const v = await r.json();
     const badge = document.getElementById('version-badge');
     if (!badge) return;
-    badge.textContent = v.commit ? `v${v.commit} · ${v.date}` : '';
+    badge.textContent = v.commit && v.commit !== 'unknown' ? `v${v.commit} · ${v.date}` : '';
     const btn = document.getElementById('btn-update');
     if (v.up_to_date === false && btn) {
       btn.classList.add('has-update');
@@ -741,16 +754,61 @@ async function loadVersion() {
   } catch {}
 }
 
-function runUpdate() {
+// Step 1 — check GitHub for a newer version, then offer to update.
+async function checkUpdates() {
   const modal = document.getElementById('update-modal');
+  const status = document.getElementById('update-status');
+  const actions = document.getElementById('update-actions');
   const log = document.getElementById('update-log');
+  document.getElementById('update-modal-title').textContent = '🔄 Обновление';
+  log.style.display = 'none';
+  log.innerHTML = '';
+  actions.innerHTML = '';
+  status.innerHTML = '<div class="spinner-line">⏳ Проверяю обновления на GitHub...</div>';
   modal.style.display = 'flex';
+
+  let v;
+  try {
+    v = await (await fetch('/api/version')).json();
+  } catch (e) {
+    status.innerHTML = '<div class="update-line error">❌ Не удалось проверить версию. Эта панель установлена из старой версии без механизма обновлений — обнови вручную один раз (см. README).</div>';
+    return;
+  }
+
+  if (v.up_to_date === true) {
+    status.innerHTML = `<div class="update-line ok">✅ У вас последняя версия.</div>
+      <div class="update-meta">Текущая: v${v.commit} · ${v.date}</div>`;
+    actions.innerHTML = `<button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
+  } else if (v.up_to_date === false) {
+    status.innerHTML = `<div class="update-line warn">⬆️ Доступно обновление!</div>
+      <div class="update-meta">Установлено: v${v.commit} · ${v.date}</div>`;
+    actions.innerHTML = `
+      <button class="btn btn--primary" onclick="runUpdate()">Обновить сейчас</button>
+      <button class="btn" onclick="closeUpdateModal()">Позже</button>`;
+  } else {
+    status.innerHTML = `<div class="update-line warn">⚠️ Не удалось сверить с GitHub (нет сети или git недоступен).</div>
+      <div class="update-meta">Текущая: v${v.commit || '?'} · ${v.date || ''}</div>`;
+    actions.innerHTML = `
+      <button class="btn btn--primary" onclick="runUpdate()">Всё равно обновить</button>
+      <button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
+  }
+}
+
+// Step 2 — pull + restart, streaming the log live.
+function runUpdate() {
+  const status = document.getElementById('update-status');
+  const actions = document.getElementById('update-actions');
+  const log = document.getElementById('update-log');
+  status.innerHTML = '';
+  actions.innerHTML = '';
+  log.style.display = 'block';
   log.innerHTML = '';
 
   const btn = document.getElementById('btn-update');
   btn.disabled = true;
 
-  const ws = new WebSocket(`ws://${location.host}/ws/update`);
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${wsProto}://${location.host}/ws/update`);
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -771,6 +829,8 @@ function runUpdate() {
           countdown.textContent = `Перезагрузка страницы через ${n}...`;
           if (--n < 0) { clearInterval(t); location.reload(); }
         }, 1000);
+      } else {
+        actions.innerHTML = `<button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
       }
     }
   };
@@ -785,6 +845,71 @@ function runUpdate() {
 
 function closeUpdateModal() {
   document.getElementById('update-modal').style.display = 'none';
+}
+
+// ── Reinstall a saved server ──────────────────────────────────────────────────
+
+async function reinstallServer(serverId, protocolName) {
+  if (!confirm(`♻️ ПЕРЕУСТАНОВКА ${protocolName}\n\nСтарая установка будет снесена, затем поставлена заново начисто. Все текущие клиенты будут пересозданы.\n\nПродолжить?`)) return;
+
+  const modal = document.getElementById('update-modal');
+  const status = document.getElementById('update-status');
+  const actions = document.getElementById('update-actions');
+  const log = document.getElementById('update-log');
+  document.getElementById('update-modal-title').textContent = `♻️ Переустановка ${protocolName}`;
+  status.innerHTML = '';
+  actions.innerHTML = '';
+  log.style.display = 'block';
+  log.innerHTML = '<div class="update-line">⏳ Запускаю переустановку...</div>';
+  modal.style.display = 'flex';
+
+  let sessionId;
+  try {
+    const res = await fetch(`/api/servers/${serverId}/reinstall`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ clean: true }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      log.innerHTML += `<div class="update-line error">❌ ${data.error}</div>`;
+      return;
+    }
+    sessionId = data.session_id;
+  } catch (e) {
+    log.innerHTML += `<div class="update-line error">❌ ${e.message}</div>`;
+    return;
+  }
+
+  const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${wsProto}://${location.host}/ws/${sessionId}`);
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'log') {
+      const m = msg.message;
+      let cls = '';
+      if (m.includes('✅') || m.includes('🎉')) cls = 'ok';
+      else if (m.includes('❌')) cls = 'error';
+      else if (m.includes('⚠️') || m.includes('⏱️')) cls = 'warn';
+      const line = document.createElement('div');
+      line.className = `update-line ${cls}`;
+      line.textContent = m;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    } else if (msg.type === 'done') {
+      const line = document.createElement('div');
+      line.className = `update-line ${msg.status === 'done' ? 'ok' : 'error'}`;
+      line.textContent = msg.status === 'done'
+        ? '✅ Переустановка завершена успешно.'
+        : `❌ ${msg.error || 'Ошибка переустановки'}`;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+      actions.innerHTML = `<button class="btn" onclick="closeUpdateModal(); switchTab('manage')">Закрыть</button>`;
+    }
+  };
+  ws.onerror = () => {
+    log.innerHTML += '<div class="update-line error">⚠️ WebSocket ошибка</div>';
+  };
 }
 
 loadVersion();

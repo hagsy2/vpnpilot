@@ -90,6 +90,23 @@ systemctl enable "$SERVICE_NAME" >/dev/null 2>&1
 systemctl restart "$SERVICE_NAME"
 ok "Сервис $SERVICE_NAME запущен"
 
+# ── Update helper (CLI fallback to the in-UI button) ──────────────────────────
+info "Устанавливаю команду обновления vpnpilot-update..."
+cat > /usr/local/bin/vpnpilot-update <<EOF
+#!/usr/bin/env bash
+set -e
+cd "${INSTALL_DIR}"
+echo "🔄 git pull..."
+git pull --rebase
+echo "📦 pip install..."
+"${INSTALL_DIR}/venv/bin/pip" install -q -r requirements.txt
+echo "🔁 restart..."
+systemctl restart ${SERVICE_NAME}
+echo "✅ Обновлено."
+EOF
+chmod +x /usr/local/bin/vpnpilot-update
+ok "Команда vpnpilot-update готова"
+
 # ── Firewall (optional) ───────────────────────────────────────────────────────
 if command -v ufw &>/dev/null; then
   ufw allow "$PORT"/tcp >/dev/null 2>&1 || true
