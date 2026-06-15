@@ -14,7 +14,12 @@ from modules.vpn_installer import PROTOCOLS
 from modules.ai_assistant import looks_like_error, ask_ai, extract_config_from_output
 from modules import storage, vpn_manager
 
-app = FastAPI(title="HA VPN Auto Installer")
+try:
+    __version__ = (Path(__file__).parent / "VERSION").read_text().strip()
+except Exception:
+    __version__ = "0.0.0"
+
+app = FastAPI(title="VPNPilot", version=__version__)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Active installation sessions
@@ -296,12 +301,18 @@ async def api_version():
             timeout=timeout, env=git_env,
         ).strip()
 
-    # Local version — must succeed independently of any network/auth.
+    # Semantic version from the VERSION file (source of truth for releases).
+    try:
+        release = (here / "VERSION").read_text().strip()
+    except Exception:
+        release = "0.0.0"
+
+    # Local git version — must succeed independently of any network/auth.
     try:
         commit = git("rev-parse", "--short", "HEAD")
         date = git("log", "-1", "--format=%ci")[:10]
     except Exception:
-        return {"commit": "unknown", "date": "", "up_to_date": None}
+        return {"version": release, "commit": "unknown", "date": "", "up_to_date": None}
 
     # Remote check — best effort. On a private repo without creds this fails;
     # that's fine, we report up_to_date=null and still allow a manual update.
@@ -312,7 +323,7 @@ async def api_version():
     except Exception:
         up_to_date = None
 
-    return {"commit": commit, "date": date, "up_to_date": up_to_date}
+    return {"version": release, "commit": commit, "date": date, "up_to_date": up_to_date}
 
 
 @app.websocket("/ws/update")

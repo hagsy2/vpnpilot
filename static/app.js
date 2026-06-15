@@ -745,7 +745,9 @@ async function loadVersion() {
     const v = await r.json();
     const badge = document.getElementById('version-badge');
     if (!badge) return;
-    badge.textContent = v.commit && v.commit !== 'unknown' ? `v${v.commit} · ${v.date}` : '';
+    const ver = v.version ? `v${v.version}` : '';
+    const sha = v.commit && v.commit !== 'unknown' ? ` · ${v.commit}` : '';
+    badge.textContent = ver + sha;
     const btn = document.getElementById('btn-update');
     if (v.up_to_date === false && btn) {
       btn.classList.add('has-update');
@@ -777,11 +779,11 @@ async function checkUpdates() {
 
   if (v.up_to_date === true) {
     status.innerHTML = `<div class="update-line ok">✅ У вас последняя версия.</div>
-      <div class="update-meta">Текущая: v${v.commit} · ${v.date}</div>`;
+      <div class="update-meta">Текущая: v${v.version || '?'} · ${v.commit} · ${v.date}</div>`;
     actions.innerHTML = `<button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
   } else if (v.up_to_date === false) {
     status.innerHTML = `<div class="update-line warn">⬆️ Доступно обновление!</div>
-      <div class="update-meta">Установлено: v${v.commit} · ${v.date}</div>`;
+      <div class="update-meta">Установлено: v${v.version || '?'} · ${v.commit} · ${v.date}</div>`;
     actions.innerHTML = `
       <button class="btn btn--primary" onclick="runUpdate()">Обновить сейчас</button>
       <button class="btn" onclick="closeUpdateModal()">Позже</button>`;
