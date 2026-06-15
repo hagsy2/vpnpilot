@@ -614,23 +614,52 @@ function renderServerDetail(detail, content, server, data) {
 
   // Outline
   else if (protocol === 'outline') {
-    const cfg = server.config || {};
-    html += `<div class="config-block">
-      <h3>Outline Manager — ключ доступа</h3>
-      <p style="font-size:.84rem;color:var(--text2);margin-bottom:10px">
-        Скопируй строку ниже (вместе с фигурными скобками) и вставь в <strong>Outline Manager → Step 2</strong>.
-        Через менеджер добавляй пользователей и получай ключи.
-      </p>
-      ${cfg.manager_key ? `<pre id="outline-key">${escHtml(cfg.manager_key)}</pre>
-      <button class="copy-btn" onclick="copyText('outline-key')">📋 Скопировать ключ менеджера</button>`
-        : `<pre>${escHtml(cfg.access_info||'нет данных')}</pre>`}
-    </div>
-    <div class="config-block">
-      <h3>Скачать Outline Manager</h3>
-      <div class="config-kv">
-        <div class="config-kv-item"><span class="k">Windows/Mac/Linux</span><span class="v"><a href="https://getoutline.org/get-started/#step-1" target="_blank" style="color:var(--accent)">getoutline.org</a></span></div>
+    const keys = data.clients || [];
+    const info = data.info || {};
+    // Главное: ключи доступа (ss://) для подключения клиентов
+    html += `
+      <div class="config-block">
+        <h3>Ключи доступа (${keys.length})</h3>
+        <p style="font-size:.84rem;color:var(--text2);margin-bottom:10px">
+          Это ссылки для подключения. Вставь <code>ss://</code> в приложение <strong>Outline</strong> или отсканируй QR.
+        </p>
+        ${keys.length ? `
+          <table class="clients-table">
+            <thead><tr><th>Имя</th><th>Действия</th></tr></thead>
+            <tbody>
+              ${keys.map(k => `<tr>
+                <td>${escHtml(k.name)}</td>
+                <td style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px">
+                  <button class="btn btn--ghost" style="padding:5px 10px;font-size:.8rem"
+                    onclick='navigator.clipboard.writeText(${JSON.stringify(k.link)}); this.textContent="✅"'>📋 ss://</button>
+                  ${k.qr ? `<button class="btn btn--ghost" style="padding:5px 10px;font-size:.8rem"
+                    onclick="showQRImg('${k.qr}', '${escHtml(k.name)}', ${JSON.stringify(k.link)})">📲 QR</button>` : ''}
+                  <button class="btn btn--danger" style="padding:5px 10px;font-size:.8rem"
+                    onclick="removeClient('${server.id}','${escHtml(k.id)}')">🗑</button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>` : '<p style="color:var(--text2);font-size:.88rem;padding:8px 0">Нет ключей — создай первый</p>'}
+        <div class="add-client-row">
+          <div class="form-group" style="flex:1">
+            <label>Имя нового ключа</label>
+            <input type="text" id="new-client-name" placeholder="phone, laptop..." value="">
+          </div>
+          <button class="btn btn--primary" onclick="addClient('${server.id}')">+ Создать ключ</button>
+        </div>
+        ${info.error ? `<p style="color:var(--red);font-size:.82rem;margin-top:8px">⚠️ ${escHtml(info.error)}</p>` : ''}
       </div>
-    </div>`;
+
+      <details class="config-block" style="cursor:pointer">
+        <summary style="font-weight:600;color:var(--text2)">⚙️ Для администратора — управляющий ключ</summary>
+        <p style="font-size:.82rem;color:var(--text2);margin:10px 0">
+          Это <strong>не</strong> ссылка для подключения. Нужен только если хочешь управлять сервером
+          из приложения <strong>Outline Manager</strong> (Step 2). Обычным пользователям не давать.
+        </p>
+        ${info.manager_key ? `<pre id="outline-key" style="font-size:.72rem">${escHtml(info.manager_key)}</pre>
+        <button class="copy-btn" onclick="copyText('outline-key')">📋 Скопировать управляющий ключ</button>`
+          : '<p style="color:var(--text2)">нет данных</p>'}
+      </details>`;
   }
 
   // IKEv2

@@ -158,6 +158,71 @@ def ss_get_info(ssh: SSHManager, server_ip: str) -> dict:
         return {"error": str(e)}
 
 
+# ── Outline access keys (ss:// ссылки для подключения клиентов) ───────────────
+
+def _outline_api(ssh: SSHManager):
+    """Вернуть (api_url, config) — собирает управляющий ключ через outline_config."""
+    from .vpn_installer import outline_config
+    cfg = outline_config(ssh, {})
+    return cfg.get("api_url", ""), cfg
+
+
+def outline_list_keys(ssh: SSHManager) -> dict:
+    """Список ключей доступа Outline (то, что вставляют в клиент Outline)."""
+    import json
+    api, cfg = _outline_api(ssh)
+    manager_key = cfg.get("manager_key", "")
+    if not api:
+        return {"keys": [], "manager_key": manager_key, "error": "Не удалось получить доступ к Outline API"}
+    out, _, _ = ssh.run_command(f"curl -sk --max-time 12 {api}/access-keys")
+    keys = []
+    try:
+        for k in json.loads(out).get("accessKeys", []):
+            url = k.get("accessUrl", "")
+            kid = str(k.get("id"))
+            keys.append({
+                "id": kid,
+                "name": k.get("name") or f"Ключ {kid}",
+                "link": url,
+                "qr": _qr_b64(url) if url else "",
+            })
+    except Exception as e:
+        return {"keys": [], "manager_key": manager_key, "error": str(e)}
+    return {"keys": keys, "manager_key": manager_key, "api_url": api}
+
+
+def outline_add_key(ssh: SSHManager, name: str = "") -> dict:
+    import json
+    api, _ = _outline_api(ssh)
+    if not api:
+        return {"error": "Не удалось получить доступ к Outline API"}
+    out, _, _ = ssh.run_command(f"curl -sk --max-time 12 -X POST {api}/access-keys")
+    try:
+        k = json.loads(out)
+    except Exception as e:
+        return {"error": f"Не удалось создать ключ: {e}"}
+    kid = str(k.get("id"))
+    safe = "".join(c for c in name if c.isalnum() or c in " -_").strip()
+    if safe:
+        ssh.run_command(
+            f"curl -sk --max-time 12 -X PUT {api}/access-keys/{kid}/name "
+            f"-H 'Content-Type: application/json' -d '{{\"name\":\"{safe}\"}}'"
+        )
+    url = k.get("accessUrl", "")
+    return {"id": kid, "name": safe or f"Ключ {kid}", "link": url,
+            "qr": _qr_b64(url) if url else "", "config": url}
+
+
+def outline_remove_key(ssh: SSHManager, key_id: str) -> bool:
+    api, _ = _outline_api(ssh)
+    if not api:
+        return False
+    out, _, _ = ssh.run_command(
+        f"curl -sk --max-time 12 -o /dev/null -w '%{{http_code}}' -X DELETE {api}/access-keys/{key_id}"
+    )
+    return out.strip().startswith("2")
+
+
 # ── Dispatcher ───────────────────────────────────────────────────────────────
 
 def enrich_install_config(ssh: SSHManager, protocol: str, config: dict, server_ip: str) -> dict:
@@ -193,11 +258,10 @@ def get_clients(ssh: SSHManager, protocol: str, server_ip: str, config: dict) ->
     if protocol == "shadowsocks":
         return {"info": ss_get_info(ssh, server_ip)}
     if protocol == "outline":
-        # re-extract fresh so manager_key is always present
-        from .vpn_installer import outline_config
-        fresh = outline_config(ssh, {})
-        fresh["server_ip"] = server_ip
-        return {"info": fresh}
+        data = outline_list_keys(ssh)
+        return {"clients": data.get("keys", []),
+                "info": {"manager_key": data.get("manager_key", ""),
+                         "server_ip": server_ip, "error": data.get("error", "")}}
     if protocol == "3x-ui":
         return {"info": config}
     return {"clients": []}
@@ -208,6 +272,8 @@ def add_client(ssh: SSHManager, protocol: str, client_name: str) -> dict:
         return wg_add_client(ssh, client_name)
     if protocol == "openvpn":
         return ovpn_add_client(ssh, client_name)
+    if protocol == "outline":
+        return outline_add_key(ssh, client_name)
     return {"error": "Добавление клиентов не поддерживается для этого протокола через панель"}
 
 
@@ -216,6 +282,8 @@ def remove_client(ssh: SSHManager, protocol: str, client_name: str) -> bool:
         return wg_remove_client(ssh, client_name)
     if protocol == "openvpn":
         return ovpn_remove_client(ssh, client_name)
+    if protocol == "outline":
+        return outline_remove_key(ssh, client_name)
     return False
 
 
