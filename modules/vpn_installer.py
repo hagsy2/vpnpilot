@@ -393,7 +393,10 @@ def outline_steps(os_info: dict, server_ip: str) -> list[InstallStep]:
         ),
         InstallStep(
             "Установка Outline сервера",
-            'bash -c "$(curl -fsSL https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)"',
+            # Watchtower (auto-updater) may fail in unprivileged LXC — that's fine,
+            # Shadowbox (the actual server) works without it. We force exit 0.
+            'bash -c "$(curl -fsSL https://raw.githubusercontent.com/Jigsaw-Code/outline-server/master/src/server_manager/install_scripts/install_server.sh)" ; '
+            'docker ps | grep -q shadowbox && echo "Outline OK" || (echo "Shadowbox not running" && exit 1)',
             timeout=300,
         ),
     ]
