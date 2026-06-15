@@ -3,6 +3,17 @@
 Все заметные изменения проекта. Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [0.4.2-beta] — 2026-06-15
+
+### Исправлено
+- **`No module named 'PIL'` при работе с QR-кодами.** Пакет `qrcode` рендерит PNG
+  через Pillow, но Pillow не был в зависимостях — на чистом контейнере QR падал
+  (например, при создании ключа Outline). Добавлен `pillow` в `requirements.txt`.
+  Плюс генерация QR сделана необязательной: если Pillow нет, операция не падает,
+  просто остаётся без картинки (ссылка всё равно доступна).
+
+[0.4.2-beta]: https://github.com/hagsy2/vpnpilot/releases/tag/v0.4.2-beta
+
 ## [0.4.1-beta] — 2026-06-15
 
 ### Исправлено

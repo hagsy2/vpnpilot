@@ -8,11 +8,18 @@ from .ssh_manager import SSHManager
 
 
 def _qr_b64(text: str) -> str:
-    """Return base64-encoded PNG QR code for text."""
-    img = qrcode.make(text)
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode()
+    """Return base64-encoded PNG QR code for text.
+
+    QR — приятный бонус, но не критичен: если Pillow (PIL) не установлен, не роняем
+    операцию (создание ключа/конфига), а просто возвращаем пустую строку — ссылка
+    остаётся доступной."""
+    try:
+        img = qrcode.make(text)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return ""
 
 
 # ── WireGuard ────────────────────────────────────────────────────────────────

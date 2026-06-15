@@ -9,3 +9,4 @@ cryptography==43.0.3
 bcrypt==4.2.1
 pydantic==2.10.3
 qrcode==8.0
+pillow==11.0.0
