@@ -939,7 +939,7 @@ function runUpdate() {
   addLine('· Подключаюсь к серверу обновления...');
 
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const ws = new WebSocket(`${wsProto}://${location.host}/ws/update`);
+  const ws = new WebSocket(`${wsProto}://${location.host}/ws-update`);
 
   ws.onopen = () => addLine('· Соединение установлено, запускаю обновление...');
 

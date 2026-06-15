@@ -415,7 +415,9 @@ async def api_changelog():
     return {"available": len(commits) > 0, "commits": commits, "changelog": changelog}
 
 
-@app.websocket("/ws/update")
+# Путь БЕЗ слэша внутри — иначе /ws/update перехватывается /ws/{session_id}
+# (FastAPI считает "update" значением session_id) и обновление не работает.
+@app.websocket("/ws-update")
 async def ws_update(websocket: WebSocket):
     await websocket.accept()
 
