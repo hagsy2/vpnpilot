@@ -392,6 +392,16 @@ def outline_steps(os_info: dict, server_ip: str) -> list[InstallStep]:
             timeout=30,
         ),
         InstallStep(
+            # Остатки от прошлых попыток ломают install_server.sh: контейнер
+            # watchtower с тем же именем уже существует → шаг падает FAILED ещё
+            # до записи apiUrl. Сносим старые контейнеры (сертификаты/ключи в
+            # /opt/outline остаются, переустановка их переиспользует).
+            "Очистка старых контейнеров Outline",
+            "docker rm -f shadowbox watchtower 2>/dev/null; echo 'cleaned'",
+            timeout=30,
+            ignore_error=True,
+        ),
+        InstallStep(
             "Установка Outline сервера",
             # Watchtower (auto-updater) may fail in unprivileged LXC — that's fine,
             # Shadowbox (the actual server) works without it. We force exit 0.
@@ -403,23 +413,72 @@ def outline_steps(os_info: dict, server_ip: str) -> list[InstallStep]:
 
 
 def outline_config(ssh, os_info: dict) -> dict:
-    out, _, _ = ssh.run_command("cat /opt/outline/access.txt 2>/dev/null || cat ~/access.txt 2>/dev/null")
-    # access.txt holds "certSha256:..." and "apiUrl:..." lines. Outline Manager
-    # needs them as one JSON blob with curly braces — reconstruct it.
-    info = {}
-    for line in out.replace("\r", "").splitlines():
-        k, _, v = line.partition(":")
-        if k.strip() in ("certSha256", "apiUrl") and v.strip():
-            info[k.strip()] = v.strip()
-    manager_key = ""
-    if "apiUrl" in info and "certSha256" in info:
-        import json as _json
-        manager_key = _json.dumps({"apiUrl": info["apiUrl"], "certSha256": info["certSha256"]})
+    """Собрать ключ для Outline Manager.
+
+    Не полагаемся на access.txt: если install_server.sh падает на шаге Watchtower
+    (напр. конфликт имён контейнера), он не успевает дописать строку apiUrl. Поэтому
+    собираем ключ напрямую из контейнера shadowbox — порт и секретный префикс берём
+    из его env, certSha256 вычисляем из сертификата. Это всегда даёт рабочий ключ,
+    пока контейнер shadowbox жив.
+    """
+    import json as _json
+
+    def sh(cmd):
+        out, _, _ = ssh.run_command(cmd)
+        return out.strip()
+
+    # 1. Параметры API из env контейнера shadowbox.
+    env = sh("docker inspect shadowbox --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null")
+    api_port = api_prefix = ""
+    for line in env.splitlines():
+        if line.startswith("SB_API_PORT="):
+            api_port = line.split("=", 1)[1].strip()
+        elif line.startswith("SB_API_PREFIX="):
+            api_prefix = line.split("=", 1)[1].strip()
+
+    # 2. Внешний хост — Outline сам пишет его в свой конфиг.
+    host = ""
+    cfg = sh("cat /opt/outline/persisted-state/shadowbox_server_config.json 2>/dev/null")
+    try:
+        host = _json.loads(cfg).get("hostname", "")
+    except Exception:
+        host = ""
+
+    # 3. certSha256 — вычисляем из текущего сертификата (надёжнее, чем access.txt).
+    cert = sh(
+        "openssl x509 -in /opt/outline/persisted-state/shadowbox-selfsigned.crt "
+        "-noout -fingerprint -sha256 2>/dev/null | sed 's/.*=//; s/://g'"
+    )
+
+    # 4. Фолбэк на access.txt для всего, что не удалось собрать напрямую.
+    access_raw = sh("cat /opt/outline/access.txt 2>/dev/null || cat ~/access.txt 2>/dev/null")
+    if not cert or not api_port or not api_prefix:
+        for line in access_raw.replace("\r", "").splitlines():
+            k, _, v = line.partition(":")
+            k, v = k.strip(), v.strip()
+            if k == "certSha256" and v and not cert:
+                cert = v
+            elif k == "apiUrl" and v and not (api_port and api_prefix):
+                # apiUrl = https://host:port/prefix — разбираем как запасной источник
+                api_url_fb = v
+                try:
+                    rest = v.split("://", 1)[1]
+                    hostport, _, pref = rest.partition("/")
+                    h, _, p = hostport.partition(":")
+                    host = host or h
+                    api_port = api_port or p
+                    api_prefix = api_prefix or pref
+                except Exception:
+                    pass
+
+    api_url = f"https://{host}:{api_port}/{api_prefix}" if (host and api_port and api_prefix) else ""
+    manager_key = _json.dumps({"apiUrl": api_url, "certSha256": cert}) if (api_url and cert) else ""
+
     return {
         "type": "outline",
         "manager_key": manager_key,
-        "api_url": info.get("apiUrl", ""),
-        "access_info": out,
+        "api_url": api_url,
+        "access_info": access_raw,
         "note": "Вставь ключ-строку (с фигурными скобками) в Outline Manager → Step 2",
     }
 
