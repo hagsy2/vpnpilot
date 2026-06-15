@@ -36,8 +36,12 @@ class SSHManager:
         code = stdout.channel.recv_exit_status()
         return out, err, code
 
-    def run_command_stream(self, command: str, on_output: Callable[[str], None], timeout: int = 600):
-        """Run command and stream output line by line via callback."""
+    def run_command_stream(self, command: str, on_output: Callable[[str], None],
+                           timeout: int = 600, should_cancel: Optional[Callable[[], bool]] = None):
+        """Run command and stream output line by line via callback.
+
+        `should_cancel` is polled in the read loop; if it returns True the channel
+        is closed and the command is aborted (used by the "Stop" button)."""
         if not self.client:
             raise RuntimeError("Not connected")
 
@@ -57,8 +61,12 @@ class SSHManager:
         # never hang forever. Set to None to disable. Capped by the hard timeout.
         idle_limit = min(timeout, 180)
 
+        cancelled = False
         while True:
             if channel.exit_status_ready() and not channel.recv_ready():
+                break
+            if should_cancel and should_cancel():
+                cancelled = True
                 break
             now = time.time()
             if now >= deadline:
@@ -83,6 +91,14 @@ class SSHManager:
 
         if buffer.strip():
             on_output(buffer.strip())
+
+        if cancelled:
+            on_output("⏹️ Установка остановлена пользователем.")
+            try:
+                channel.close()
+            except Exception:
+                pass
+            return 130
 
         if timed_out:
             # Command is stuck — don't block on recv_exit_status (it would hang

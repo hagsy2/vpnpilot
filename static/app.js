@@ -2,11 +2,46 @@ let selectedProtocol = null;
 let connectionOk = false;
 let currentServerId = null;
 let qrLinkText = '';
+let currentSessionId = null;
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadProtocols();
+  loadSavedHosts();
 });
+
+// ── Сохранённые серверы ───────────────────────────────────────────────────────
+async function loadSavedHosts() {
+  let hosts;
+  try {
+    hosts = await (await fetch('/api/hosts')).json();
+  } catch { return; }
+  const box = document.getElementById('saved-hosts');
+  const list = document.getElementById('saved-hosts-list');
+  if (!box || !list) return;
+  if (!hosts || !hosts.length) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  list.innerHTML = hosts.map(h => `
+    <div class="saved-host" onclick='useSavedHost(${JSON.stringify(h).replace(/'/g, "&#39;")})'>
+      <span class="sh-ip">${escHtml(h.host)}</span>
+      <span class="sh-meta">${escHtml(h.username)}@:${h.port}</span>
+      <button class="sh-del" title="Убрать из списка"
+        onclick='event.stopPropagation(); deleteSavedHost("${escHtml(h.host)}", ${h.port})'>✕</button>
+    </div>`).join('');
+}
+
+function useSavedHost(h) {
+  document.getElementById('host').value = h.host;
+  document.getElementById('port').value = h.port;
+  document.getElementById('username').value = h.username;
+  document.getElementById('password').value = h.password || '';
+  document.getElementById('host').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+async function deleteSavedHost(host, port) {
+  await fetch(`/api/hosts/${encodeURIComponent(host)}/${port}`, { method: 'DELETE' });
+  loadSavedHosts();
+}
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(tab) {
@@ -134,6 +169,7 @@ async function testConnection() {
       showTestResult('ok', `✅ Подключено! ${data.message}`);
       connectionOk = true;
       document.getElementById('step-protocol').classList.remove('card--locked');
+      loadSavedHosts();  // сервер запомнен — обновим список
     } else {
       showTestResult('error', `❌ ${data.message}`);
       connectionOk = false;
@@ -165,6 +201,8 @@ async function startInstall() {
   document.getElementById('error-card').classList.add('hidden');
   document.getElementById('terminal').innerHTML = '';
   setStatusBadge('running', '⏳ Выполняется');
+  const stopBtn = document.getElementById('btn-stop');
+  if (stopBtn) { stopBtn.classList.remove('hidden'); stopBtn.disabled = false; }
   document.getElementById('terminal-card').scrollIntoView({ behavior: 'smooth' });
 
   const payload = {
@@ -184,11 +222,27 @@ async function startInstall() {
     });
     const data = await res.json();
     if (data.error) { showError(data.error); btn.disabled = false; return; }
+    currentSessionId = data.session_id;
+    loadSavedHosts();  // сервер сохранён — обновим список
     connectWS(data.session_id, payload.host);
   } catch (e) {
     showError('Не удалось запустить установку: ' + e.message);
     btn.disabled = false;
   }
+}
+
+// Остановить идущую (или зависшую) установку.
+async function stopInstall() {
+  if (!currentSessionId) return;
+  const stopBtn = document.getElementById('btn-stop');
+  if (stopBtn) { stopBtn.disabled = true; stopBtn.textContent = '⏳ Останавливаю...'; }
+  appendLog('⏹️ Останавливаю установку...');
+  try {
+    await fetch(`/api/install/${currentSessionId}/cancel`, { method: 'POST' });
+  } catch (e) {
+    appendLog('⚠️ Не удалось отправить команду остановки: ' + e.message);
+  }
+  if (stopBtn) stopBtn.textContent = '⏹ Остановить';
 }
 
 // ── WebSocket ─────────────────────────────────────────────────────────────────
@@ -201,6 +255,9 @@ function connectWS(sessionId, serverIp) {
     if (msg.type === 'log') {
       appendLog(msg.message);
     } else if (msg.type === 'done') {
+      const stopBtn = document.getElementById('btn-stop');
+      if (stopBtn) stopBtn.classList.add('hidden');
+      currentSessionId = null;
       if (msg.status === 'done') {
         setStatusBadge('done', '✅ Готово');
         showConfig(msg.config, serverIp);

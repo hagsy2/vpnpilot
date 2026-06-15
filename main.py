@@ -74,6 +74,9 @@ async def get_protocols():
 @app.post("/api/test-connection")
 async def api_test_connection(req: TestConnRequest):
     ok, msg = await test_connection(req.host, req.port, req.username, req.password)
+    if ok:
+        # Запоминаем сервер сразу после успешного теста — попадёт в список.
+        storage.save_host(req.host, req.port, req.username, req.password)
     return {"success": ok, "message": msg}
 
 
@@ -83,16 +86,37 @@ async def api_test_connection(req: TestConnRequest):
 async def api_install(req: InstallRequest):
     if req.protocol not in PROTOCOLS:
         return JSONResponse({"error": "Неизвестный протокол"}, status_code=400)
+    # Запоминаем сервер, чтобы не вводить IP/пароль в следующий раз.
+    storage.save_host(req.host, req.port, req.username, req.password)
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
         "status": "pending",
         "log": [],
         "config": None,
         "error": None,
+        "cancel": False,
+        "ssh": None,
         "req": req.model_dump(),
     }
     asyncio.create_task(run_installation(session_id))
     return {"session_id": session_id}
+
+
+@app.post("/api/install/{session_id}/cancel")
+async def api_cancel_install(session_id: str):
+    """Остановить зависшую/идущую установку."""
+    session = sessions.get(session_id)
+    if not session:
+        return JSONResponse({"error": "Сессия не найдена"}, status_code=404)
+    session["cancel"] = True
+    # Рвём SSH-соединение, чтобы заблокированное чтение в потоке сразу освободилось.
+    ssh = session.get("ssh")
+    if ssh:
+        try:
+            ssh.disconnect()
+        except Exception:
+            pass
+    return {"success": True}
 
 
 @app.websocket("/ws/{session_id}")
@@ -139,6 +163,17 @@ async def api_list_servers():
 async def api_delete_server(server_id: str):
     ok = storage.delete_server(server_id)
     return {"success": ok}
+
+
+@app.get("/api/hosts")
+async def api_list_hosts():
+    """Сохранённые серверы для автозаполнения формы установки."""
+    return storage.list_hosts()
+
+
+@app.delete("/api/hosts/{host}/{port}")
+async def api_delete_host(host: str, port: int):
+    return {"success": storage.delete_host(host, port)}
 
 
 @app.post("/api/servers/{server_id}/uninstall")
@@ -189,6 +224,8 @@ async def api_reinstall(server_id: str, body: dict = None):
         "log": [],
         "config": None,
         "error": None,
+        "cancel": False,
+        "ssh": None,
         "req": {
             "host": srv["host"],
             "port": srv["port"],
@@ -443,6 +480,10 @@ async def ws_update(websocket: WebSocket):
 
 # ── Installation runner ───────────────────────────────────────────────────────
 
+class InstallCancelled(Exception):
+    """Поднимается, когда пользователь остановил установку."""
+
+
 async def run_installation(session_id: str):
     session = sessions[session_id]
     req_data = session["req"]
@@ -454,6 +495,8 @@ async def run_installation(session_id: str):
         session["log"].append(f"{prefix} {msg}")
 
     ssh = SSHManager()
+    session["ssh"] = ssh
+    should_cancel = lambda: session.get("cancel", False)
     protocol = PROTOCOLS[req_data["protocol"]]
     all_output_lines: list = []
     error_buffer: list = []
@@ -489,7 +532,8 @@ async def run_installation(session_id: str):
             log("Очистка предыдущей установки перед переустановкой...", "step")
             await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: ssh.run_command_stream(protocol.uninstall_cmd, on_output, timeout=300),
+                lambda: ssh.run_command_stream(protocol.uninstall_cmd, on_output,
+                                               timeout=300, should_cancel=should_cancel),
             )
             error_buffer.clear()
             log("Очистка завершена", "ok")
@@ -498,12 +542,18 @@ async def run_installation(session_id: str):
         log(f"Начинаю установку {protocol.name} ({len(steps)} шагов)", "step")
 
         for i, step in enumerate(steps, 1):
+            if should_cancel():
+                raise InstallCancelled()
             log(f"[{i}/{len(steps)}] {step.description}", "step")
 
             exit_code = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda s=step: ssh.run_command_stream(s.command, on_output, timeout=s.timeout),
+                lambda s=step: ssh.run_command_stream(s.command, on_output,
+                                                      timeout=s.timeout, should_cancel=should_cancel),
             )
+
+            if should_cancel() or exit_code == 130:
+                raise InstallCancelled()
 
             if exit_code != 0 and not step.ignore_error:
                 if req_data.get("deepseek_api_key") and error_buffer:
@@ -569,6 +619,10 @@ async def run_installation(session_id: str):
         session["status"] = "done"
         log(f"🎉 {protocol.name} установлен! Сервер сохранён в управление.", "ok")
 
+    except InstallCancelled:
+        session["status"] = "error"
+        session["error"] = "Установка остановлена пользователем"
+        log("⏹️ Установка остановлена. Сервер сохранён — можно попробовать снова.", "warn")
     except Exception as e:
         session["status"] = "error"
         session["error"] = str(e)

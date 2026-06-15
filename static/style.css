@@ -357,6 +357,36 @@ input::placeholder { color: var(--text3); }
   margin-left: auto; padding: 4px 10px; border-radius: 20px;
   font-size: 0.78rem; font-weight: 600;
 }
+
+/* ── Кнопка остановки установки ── */
+.btn-stop {
+  margin-left: 10px; padding: 5px 12px; border-radius: 8px;
+  font-size: 0.78rem; font-weight: 600; cursor: pointer;
+  background: rgba(248,81,73,0.12); color: var(--red);
+  border: 1px solid rgba(248,81,73,0.4); transition: all .15s;
+}
+.btn-stop:hover { background: rgba(248,81,73,0.22); }
+.btn-stop:disabled { opacity: .6; cursor: not-allowed; }
+
+/* ── Сохранённые серверы ── */
+.saved-hosts { margin: 14px 0; }
+.saved-hosts-title {
+  font-size: 0.8rem; font-weight: 600; color: var(--text2); margin-bottom: 8px;
+}
+.saved-hosts-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.saved-host {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; transition: all .15s;
+}
+.saved-host:hover { border-color: var(--accent); background: rgba(47,129,247,0.08); }
+.saved-host .sh-ip { font-weight: 600; font-size: 0.86rem; }
+.saved-host .sh-meta { color: var(--text2); font-size: 0.76rem; font-family: monospace; }
+.saved-host .sh-del {
+  background: none; border: none; color: var(--text2); cursor: pointer;
+  font-size: 0.8rem; padding: 0 2px; line-height: 1;
+}
+.saved-host .sh-del:hover { color: var(--red); }
 .status-badge--running { background: rgba(47,129,247,0.15); color: var(--accent); border: 1px solid rgba(47,129,247,0.3); }
 .status-badge--done { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
 .status-badge--error { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }

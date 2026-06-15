@@ -73,6 +73,11 @@
         </div>
       </div>
 
+      <div id="saved-hosts" class="saved-hosts hidden">
+        <div class="saved-hosts-title">💾 Сохранённые серверы</div>
+        <div id="saved-hosts-list" class="saved-hosts-list"></div>
+      </div>
+
       <div class="ai-box">
         <div class="ai-box-head">
           <span class="ai-box-icon">🤖</span>
@@ -134,6 +139,7 @@
         <span class="terminal-dot green"></span>
         <span style="margin-left:12px;font-weight:600;color:#a0aec0">Установка VPN</span>
         <div id="status-badge" class="status-badge status-badge--running">⏳ Выполняется</div>
+        <button id="btn-stop" class="btn-stop hidden" onclick="stopInstall()" title="Остановить установку">⏹ Остановить</button>
       </div>
       <div id="terminal" class="terminal"></div>
     </div>
