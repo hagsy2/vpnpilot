@@ -926,24 +926,36 @@ function runUpdate() {
   const btn = document.getElementById('btn-update');
   btn.disabled = true;
 
+  const addLine = (text, cls = '') => {
+    const line = document.createElement('div');
+    line.className = `update-line ${cls}`;
+    line.textContent = text;
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+  };
+
+  let doneReceived = false;
+  let restarting = false;
+  addLine('· Подключаюсь к серверу обновления...');
+
   const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${wsProto}://${location.host}/ws/update`);
+
+  ws.onopen = () => addLine('· Соединение установлено, запускаю обновление...');
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);
     if (msg.type === 'log') {
-      const line = document.createElement('div');
-      line.className = `update-line ${msg.level || ''}`;
-      line.textContent = msg.message;
-      log.appendChild(line);
-      log.scrollTop = log.scrollHeight;
+      addLine(msg.message, msg.level || '');
     } else if (msg.type === 'done') {
+      doneReceived = true;
       btn.disabled = false;
       if (msg.restart) {
+        restarting = true;
         const countdown = document.createElement('div');
         countdown.className = 'update-line ok';
         log.appendChild(countdown);
-        let n = 5;
+        let n = 6;
         const t = setInterval(() => {
           countdown.textContent = `Перезагрузка страницы через ${n}...`;
           if (--n < 0) { clearInterval(t); location.reload(); }
@@ -953,12 +965,17 @@ function runUpdate() {
       }
     }
   };
-  ws.onerror = () => {
-    const line = document.createElement('div');
-    line.className = 'update-line error';
-    line.textContent = '❌ Соединение прервано';
-    log.appendChild(line);
+
+  ws.onerror = () => addLine('⚠️ Ошибка WebSocket-соединения', 'error');
+
+  ws.onclose = () => {
     btn.disabled = false;
+    if (restarting) return;  // ожидаемо — сервис перезапускается
+    if (!doneReceived) {
+      addLine('❌ Соединение закрылось до завершения обновления.', 'error');
+      addLine('Это значит, что процесс обновления упал на сервере. Скопируй лог выше и пришли его — разберёмся.', 'warn');
+      actions.innerHTML = `<button class="btn" onclick="closeUpdateModal()">Закрыть</button>`;
+    }
   };
 }
 

@@ -457,9 +457,12 @@ async def ws_update(websocket: WebSocket):
             await websocket.send_json({"type": "done", "success": True, "restart": False})
             return
 
+        _, cur_ver = await run_git("describe", "--tags", "--always")
+        await send(f"Текущая версия: {cur_ver or local[:7]}")
+
         # Надёжное обновление: reset --hard игнорирует любую локальную «грязь»
         # (изменённые права, недокачанный rebase) — git pull --rebase на таком падал.
-        await send("⬇️ Применяю обновление...")
+        await send("⬇️ Применяю обновление (git reset --hard origin/main)...")
         code, out = await run_git("reset", "--hard", "origin/main")
         for line in out.splitlines():
             await send(line)
@@ -467,6 +470,8 @@ async def ws_update(websocket: WebSocket):
             await send("❌ Не удалось применить обновление.", "error")
             await websocket.send_json({"type": "done", "success": False})
             return
+        _, new_ver = await run_git("describe", "--tags", "--always")
+        await send(f"Новая версия: {new_ver or remote[:7]}", "ok")
 
         await send("📦 Обновляю зависимости...")
         venv_pip = install_dir / "venv" / "bin" / "pip"
@@ -500,8 +505,14 @@ async def ws_update(websocket: WebSocket):
                 start_new_session=True, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
             )
     except Exception as e:
-        await send(f"❌ Ошибка: {e}", "error")
-        await websocket.send_json({"type": "done", "success": False})
+        import traceback
+        await send(f"❌ Ошибка обновления: {e}", "error")
+        for tl in traceback.format_exc().splitlines()[-6:]:
+            await send(tl)
+        try:
+            await websocket.send_json({"type": "done", "success": False})
+        except Exception:
+            pass
 
 
 # ── Installation runner ───────────────────────────────────────────────────────
