@@ -465,14 +465,25 @@ async def ws_update(websocket: WebSocket):
             if line.strip():
                 await send(line)
 
-        await send("🔁 Перезапускаю сервис...")
-        proc3 = await asyncio.create_subprocess_exec(
-            "systemctl", "restart", "ha-vpn-auto",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-        )
-        await proc3.communicate()
-        await send("✅ Обновление применено! Страница обновится через 5 секунд.", "ok")
+        await send("✅ Обновление применено! Сервис перезапустится, страница обновится через 5 секунд.", "ok")
+        # ВАЖНО: сначала шлём done, потом перезапускаем. systemctl restart убивает
+        # этот же процесс uvicorn — если рестартить до отправки done, фронт его не
+        # получит и зависнет. Дав сообщению уйти, запускаем рестарт ОТВЯЗАННО через
+        # systemd-run (transient unit вне cgroup сервиса), чтобы он пережил наше
+        # завершение и реально перезапустил панель.
         await websocket.send_json({"type": "done", "success": True, "restart": True})
+        await asyncio.sleep(0.4)
+        import subprocess as _sp
+        try:
+            _sp.Popen(
+                ["systemd-run", "--on-active=1", "systemctl", "restart", "ha-vpn-auto"],
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            )
+        except FileNotFoundError:
+            _sp.Popen(
+                "sleep 1; systemctl restart ha-vpn-auto", shell=True,
+                start_new_session=True, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+            )
     except Exception as e:
         await send(f"❌ Ошибка: {e}", "error")
         await websocket.send_json({"type": "done", "success": False})

@@ -3,7 +3,7 @@
 > Веб-панель для автоматической установки VPN на удалённые серверы по SSH.  
 > Вводишь IP и пароль — остальное делает она.
 
-![Version](https://img.shields.io/badge/version-0.3.0--beta-orange)
+![Version](https://img.shields.io/badge/version-0.3.1--beta-orange)
 ![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 ![Protocols](https://img.shields.io/badge/протоколов-7-6366f1)

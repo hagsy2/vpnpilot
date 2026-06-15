@@ -11,8 +11,10 @@ set -euo pipefail
 REPO_URL="${REPO_URL:-https://github.com/hagsy2/vpnpilot}"
 REPO_RAW="${REPO_URL/github.com/raw.githubusercontent.com}/${REPO_BRANCH:-main}"
 
-# Container defaults (override via env: HOSTNAME, DISK, CORES, RAM, BRIDGE, STORAGE)
-CT_HOSTNAME="${HOSTNAME:-vpnpilot}"
+# Container defaults (override via env: CT_HOSTNAME, DISK, CORES, RAM, BRIDGE, STORAGE)
+# ВАЖНО: используем CT_HOSTNAME, а НЕ HOSTNAME — последняя является стандартной
+# переменной bash (= имя текущего хоста), из-за чего контейнер брал имя Proxmox-хоста.
+CT_HOSTNAME="${CT_HOSTNAME:-vpnpilot}"
 CT_DISK="${DISK:-4}"          # GB
 CT_CORES="${CORES:-1}"
 CT_RAM="${RAM:-1024}"         # MB
