@@ -409,6 +409,20 @@ def outline_steps(os_info: dict, server_ip: str) -> list[InstallStep]:
             'docker ps | grep -q shadowbox && echo "Outline OK" || (echo "Shadowbox not running" && exit 1)',
             timeout=300,
         ),
+        InstallStep(
+            # Outline по умолчанию вешает ключи на случайный высокий порт, который
+            # часто режут фаерволы операторов/провайдеров (исходящие не на 80/443/53).
+            # Переводим порт новых ключей на 443 — проходит почти везде, как HTTPS.
+            "Настройка порта 443 (обход блокировок)",
+            'sleep 2; '
+            'AP=$(docker inspect shadowbox --format "{{range .Config.Env}}{{println .}}{{end}}" | grep "^SB_API_PORT=" | cut -d= -f2); '
+            'PX=$(docker inspect shadowbox --format "{{range .Config.Env}}{{println .}}{{end}}" | grep "^SB_API_PREFIX=" | cut -d= -f2); '
+            'printf \'{"port":443}\' > /tmp/op.json; '
+            'curl -sk --max-time 10 -X PUT "https://127.0.0.1:$AP/$PX/server/port-for-new-access-keys" -H "Content-Type: application/json" -d @/tmp/op.json; '
+            'rm -f /tmp/op.json; echo "Порт ключей: 443"',
+            timeout=30,
+            ignore_error=True,  # если 443 занят — не критично, ключи останутся на дефолтном
+        ),
     ]
 
 
