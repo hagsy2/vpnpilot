@@ -96,8 +96,11 @@ cat > /usr/local/bin/vpnpilot-update <<EOF
 #!/usr/bin/env bash
 set -e
 cd "${INSTALL_DIR}"
-echo "🔄 git pull..."
-git pull --rebase
+git config --global --add safe.directory "${INSTALL_DIR}" 2>/dev/null || true
+echo "🔄 Получаю обновления..."
+GIT_TERMINAL_PROMPT=0 git fetch origin main
+echo "⬇️  Применяю (reset --hard, устойчиво к локальной грязи)..."
+git reset --hard origin/main
 echo "📦 pip install..."
 "${INSTALL_DIR}/venv/bin/pip" install -q -r requirements.txt
 echo "🔁 restart..."

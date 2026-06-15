@@ -3,6 +3,18 @@
 Все заметные изменения проекта. Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [0.4.1-beta] — 2026-06-15
+
+### Исправлено
+- **Обновление молча не применялось.** `git pull --rebase` падал с кодом 128,
+  если рабочее дерево на сервере «грязное» (изменённые права файлов, недокачанный
+  rebase от прошлых попыток). Теперь обновление идёт через `git fetch` +
+  `git reset --hard origin/main` — устойчиво к любому состоянию дерева. Добавлен
+  `safe.directory` (от ошибки «dubious ownership»). То же в CLI `vpnpilot-update`.
+  Причина воспроизведена локально.
+
+[0.4.1-beta]: https://github.com/hagsy2/vpnpilot/releases/tag/v0.4.1-beta
+
 ## [0.4.0-beta] — 2026-06-15
 
 ### Добавлено

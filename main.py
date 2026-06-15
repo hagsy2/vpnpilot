@@ -426,31 +426,46 @@ async def ws_update(websocket: WebSocket):
         install_dir = Path(__file__).parent
         await send("🔄 Получаю обновления из GitHub...")
 
-        # GIT_TERMINAL_PROMPT=0 → never block on a credential prompt (private repo
-        # without creds fails fast with a clear error instead of hanging forever).
+        # GIT_TERMINAL_PROMPT=0 → never block on a credential prompt.
         import os as _os
         git_env = {**_os.environ, "GIT_TERMINAL_PROMPT": "0"}
 
-        proc = await asyncio.create_subprocess_exec(
-            "git", "pull", "--rebase",
-            cwd=str(install_dir),
-            env=git_env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-        stdout, _ = await proc.communicate()
-        output = stdout.decode(errors="replace").strip()
-        for line in output.splitlines():
-            await send(line)
+        async def run_git(*args):
+            proc = await asyncio.create_subprocess_exec(
+                "git", *args, cwd=str(install_dir), env=git_env,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+            )
+            out, _ = await proc.communicate()
+            return proc.returncode, out.decode(errors="replace").strip()
 
-        if proc.returncode != 0:
-            await send("❌ git pull не удался. Если репозиторий приватный — на сервере нужно один раз настроить доступ к GitHub (токен). См. README → Обновления.", "error")
+        # git может ругаться на "dubious ownership" — разрешаем эту директорию.
+        await run_git("config", "--global", "--add", "safe.directory", str(install_dir))
+
+        code, out = await run_git("fetch", "origin", "main")
+        if out:
+            for line in out.splitlines():
+                await send(line)
+        if code != 0:
+            await send("❌ Не удалось связаться с GitHub. Проверь интернет/доступ к репозиторию.", "error")
             await websocket.send_json({"type": "done", "success": False})
             return
 
-        if "Already up to date" in output:
+        _, local = await run_git("rev-parse", "HEAD")
+        _, remote = await run_git("rev-parse", "origin/main")
+        if local and local == remote:
             await send("✅ Уже последняя версия, перезапуск не нужен", "ok")
             await websocket.send_json({"type": "done", "success": True, "restart": False})
+            return
+
+        # Надёжное обновление: reset --hard игнорирует любую локальную «грязь»
+        # (изменённые права, недокачанный rebase) — git pull --rebase на таком падал.
+        await send("⬇️ Применяю обновление...")
+        code, out = await run_git("reset", "--hard", "origin/main")
+        for line in out.splitlines():
+            await send(line)
+        if code != 0:
+            await send("❌ Не удалось применить обновление.", "error")
+            await websocket.send_json({"type": "done", "success": False})
             return
 
         await send("📦 Обновляю зависимости...")
