@@ -248,6 +248,83 @@ async def api_get_client_config(server_id: str, client_name: str):
         ssh.disconnect()
 
 
+# ── Self-update ───────────────────────────────────────────────────────────────
+
+@app.get("/api/version")
+async def api_version():
+    try:
+        import subprocess
+        commit = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=Path(__file__).parent, text=True
+        ).strip()
+        date = subprocess.check_output(
+            ["git", "log", "-1", "--format=%ci"], cwd=Path(__file__).parent, text=True
+        ).strip()[:10]
+        remote = subprocess.check_output(
+            ["git", "ls-remote", "origin", "HEAD"], cwd=Path(__file__).parent, text=True
+        ).strip()[:7]
+        return {"commit": commit, "date": date, "up_to_date": remote == commit}
+    except Exception:
+        return {"commit": "unknown", "date": "", "up_to_date": None}
+
+
+@app.websocket("/ws/update")
+async def ws_update(websocket: WebSocket):
+    await websocket.accept()
+
+    async def send(msg: str, level: str = "info"):
+        await websocket.send_json({"type": "log", "level": level, "message": msg})
+
+    try:
+        install_dir = Path(__file__).parent
+        await send("🔄 Получаю обновления из GitHub...")
+
+        proc = await asyncio.create_subprocess_exec(
+            "git", "pull", "--rebase",
+            cwd=str(install_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        stdout, _ = await proc.communicate()
+        output = stdout.decode(errors="replace").strip()
+        for line in output.splitlines():
+            await send(line)
+
+        if proc.returncode != 0:
+            await send("❌ git pull завершился с ошибкой", "error")
+            await websocket.send_json({"type": "done", "success": False})
+            return
+
+        if "Already up to date" in output:
+            await send("✅ Уже последняя версия, перезапуск не нужен", "ok")
+            await websocket.send_json({"type": "done", "success": True, "restart": False})
+            return
+
+        await send("📦 Обновляю зависимости...")
+        venv_pip = install_dir / "venv" / "bin" / "pip"
+        pip_bin = str(venv_pip) if venv_pip.exists() else "pip3"
+        proc2 = await asyncio.create_subprocess_exec(
+            pip_bin, "install", "-q", "-r", str(install_dir / "requirements.txt"),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        out2, _ = await proc2.communicate()
+        for line in out2.decode(errors="replace").strip().splitlines():
+            if line.strip():
+                await send(line)
+
+        await send("🔁 Перезапускаю сервис...")
+        proc3 = await asyncio.create_subprocess_exec(
+            "systemctl", "restart", "ha-vpn-auto",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        )
+        await proc3.communicate()
+        await send("✅ Обновление применено! Страница обновится через 5 секунд.", "ok")
+        await websocket.send_json({"type": "done", "success": True, "restart": True})
+    except Exception as e:
+        await send(f"❌ Ошибка: {e}", "error")
+        await websocket.send_json({"type": "done", "success": False})
+
+
 # ── Installation runner ───────────────────────────────────────────────────────
 
 async def run_installation(session_id: str):

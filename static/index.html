@@ -22,7 +22,23 @@
       <button class="tab active" onclick="switchTab('install')">🚀 Установка</button>
       <button class="tab" onclick="switchTab('manage')" id="tab-manage">📋 Серверы</button>
     </nav>
+    <div class="header-right">
+      <span id="version-badge" class="version-badge" title="Текущая версия"></span>
+      <button class="btn-update" id="btn-update" onclick="runUpdate()" title="Обновить до последней версии">⬆ Обновить</button>
+    </div>
   </header>
+
+  <!-- Update modal -->
+  <div id="update-modal" class="modal" style="display:none">
+    <div class="modal-backdrop" onclick="closeUpdateModal()"></div>
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3>🔄 Обновление VPNPilot</h3>
+        <button class="modal-close" onclick="closeUpdateModal()">✕</button>
+      </div>
+      <div id="update-log" class="update-log"></div>
+    </div>
+  </div>
 
   <!-- ══════════════════════ TAB: INSTALL ══════════════════════ -->
   <div id="page-install">

@@ -723,3 +723,68 @@ function downloadFile(filename, id) {
   a.download = filename;
   a.click();
 }
+
+// ── Update ────────────────────────────────────────────────────────────────────
+
+async function loadVersion() {
+  try {
+    const r = await fetch('/api/version');
+    const v = await r.json();
+    const badge = document.getElementById('version-badge');
+    if (!badge) return;
+    badge.textContent = v.commit ? `v${v.commit} · ${v.date}` : '';
+    const btn = document.getElementById('btn-update');
+    if (v.up_to_date === false && btn) {
+      btn.classList.add('has-update');
+      btn.title = 'Доступно обновление!';
+    }
+  } catch {}
+}
+
+function runUpdate() {
+  const modal = document.getElementById('update-modal');
+  const log = document.getElementById('update-log');
+  modal.style.display = 'flex';
+  log.innerHTML = '';
+
+  const btn = document.getElementById('btn-update');
+  btn.disabled = true;
+
+  const ws = new WebSocket(`ws://${location.host}/ws/update`);
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'log') {
+      const line = document.createElement('div');
+      line.className = `update-line ${msg.level || ''}`;
+      line.textContent = msg.message;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    } else if (msg.type === 'done') {
+      btn.disabled = false;
+      if (msg.restart) {
+        const countdown = document.createElement('div');
+        countdown.className = 'update-line ok';
+        log.appendChild(countdown);
+        let n = 5;
+        const t = setInterval(() => {
+          countdown.textContent = `Перезагрузка страницы через ${n}...`;
+          if (--n < 0) { clearInterval(t); location.reload(); }
+        }, 1000);
+      }
+    }
+  };
+  ws.onerror = () => {
+    const line = document.createElement('div');
+    line.className = 'update-line error';
+    line.textContent = '❌ Соединение прервано';
+    log.appendChild(line);
+    btn.disabled = false;
+  };
+}
+
+function closeUpdateModal() {
+  document.getElementById('update-modal').style.display = 'none';
+}
+
+loadVersion();

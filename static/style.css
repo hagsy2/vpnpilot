@@ -55,6 +55,41 @@ body {
 .logo h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
 .subtitle { color: var(--text2); font-size: 0.82rem; }
 
+/* ── Header right ── */
+.header-right { display: flex; align-items: center; gap: 10px; }
+.version-badge {
+  font-size: 0.72rem; color: var(--text2); font-family: monospace;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 8px; white-space: nowrap;
+}
+.btn-update {
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text2); border-radius: 8px; padding: 7px 14px;
+  font-size: 0.82rem; cursor: pointer; transition: all .2s;
+}
+.btn-update:hover { border-color: var(--accent); color: var(--accent); }
+.btn-update.has-update {
+  border-color: #f59e0b; color: #f59e0b;
+  box-shadow: 0 0 8px rgba(245,158,11,.3);
+  animation: pulse-update 2s infinite;
+}
+.btn-update:disabled { opacity: .5; cursor: not-allowed; }
+@keyframes pulse-update {
+  0%,100% { box-shadow: 0 0 8px rgba(245,158,11,.3); }
+  50% { box-shadow: 0 0 16px rgba(245,158,11,.6); }
+}
+
+/* ── Update modal ── */
+.update-log {
+  background: #0d1117; border-radius: 8px; padding: 14px;
+  font-family: monospace; font-size: 0.82rem; line-height: 1.6;
+  max-height: 340px; overflow-y: auto; min-height: 80px;
+}
+.update-line { color: var(--text2); }
+.update-line.ok { color: #3fb950; }
+.update-line.error { color: #f85149; }
+.update-line.warn { color: #d29922; }
+
 /* ── Tabs ── */
 .tabs { display: flex; gap: 6px; }
 .tab {
