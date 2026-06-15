@@ -3,7 +3,7 @@
 Все заметные изменения проекта. Формат основан на [Keep a Changelog](https://keepachangelog.com/ru/),
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
-## [Unreleased]
+## [0.2.0-beta] — 2026-06-15
 
 ### Добавлено
 - Патчноут при обновлении: диалог обновления показывает список изменений
@@ -11,6 +11,8 @@
 
 ### Изменено
 - Контейнер в Proxmox теперь по умолчанию называется `vpnpilot` (было `ha-vpn-auto`).
+
+[0.2.0-beta]: https://github.com/hagsy2/vpnpilot/releases/tag/v0.2.0-beta
 
 ## [0.1.0-beta] — 2026-06-15
 
